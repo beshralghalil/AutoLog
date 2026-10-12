@@ -8,10 +8,9 @@ import customtkinter as ctk
 import pytz
 from customtkinter import ThemeManager
 
+from autolog.constants import APPLY_TO_ALL_PLACEHOLDER
 from autolog.consumers.base import CredentialField, TargetField
 from autolog.providers.factory import get_providers_names
-
-APPLY_TO_ALL_PLACEHOLDER = "— apply to all —"
 
 
 def column_id(tree: ttk.Treeview, name: str) -> str:
@@ -159,10 +158,15 @@ class TargetsFrame(ctk.CTkFrame):
         self,
         master: ctk.CTk,
         apply_callback: Callable[[TargetField, str], None],
+        refresh_callback: Callable[[], None],
         **kwargs,
     ):
         super().__init__(master, **kwargs)
         self.apply_callback = apply_callback
+        self.refresh_btn = ctk.CTkButton(
+            self, text="Refresh", width=90, command=refresh_callback
+        )
+        self.refresh_btn.pack(side="right", padx=5, pady=5)
         self.widgets: list[ctk.CTkBaseClass] = []
 
     def set_fields(
@@ -180,8 +184,8 @@ class TargetsFrame(ctk.CTkFrame):
                 command=lambda value, f=field: self._on_select(f, value),
             )
             selector.set(APPLY_TO_ALL_PLACEHOLDER)
-            label.pack(side="left", padx=(10, 2))
-            selector.pack(side="left", padx=5)
+            label.pack(side="left", padx=(10, 2), pady=5)
+            selector.pack(side="left", padx=5, pady=5)
             self.widgets += [label, selector]
 
     def _on_select(self, field: TargetField, value: str) -> None:

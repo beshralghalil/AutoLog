@@ -69,6 +69,7 @@ class KimaiConsumer(ConsumerBase):
         return sorted({activity["name"] for activity in activities})
 
     def assign_targets(self, entries: list[WorklogEntry]) -> None:
+        """Only fill gaps, so a refresh keeps whatever the user picked."""
         for entry in entries:
             if not entry.target_project:
                 entry.target_project = best_match(
@@ -77,7 +78,8 @@ class KimaiConsumer(ConsumerBase):
                     entry.raw_issue_key,
                     entry.activity,
                 )
-            self._match_activity(entry)
+            if not entry.target_activity:
+                self._match_activity(entry)
 
     def _match_activity(self, entry: WorklogEntry) -> None:
         names = {a["name"] for a in self._project_activities(entry.target_project)}

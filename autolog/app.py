@@ -1,6 +1,7 @@
 """GUI logic"""
 
 import logging
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -9,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional, Tuple
 
 import customtkinter as ctk
+from customtkinter.windows.widgets.core_rendering.draw_engine import DrawEngine
 
 from autolog.__version__ import version
 from autolog.constants import (
@@ -20,7 +22,9 @@ from autolog.constants import (
     DEFAULT_COLUMN_WIDTH,
     STATUS_DISPLAY,
     TABLE_COLUMN_WIDTHS,
+    TABLE_ROW_HEIGHT,
     TRAILING_TABLE_COLUMNS,
+    UNMATCHED_PREFIX,
 )
 from autolog.consumers.base import TargetField
 from autolog.consumers.factory import get_consumer_class, get_consumers_names
@@ -34,6 +38,7 @@ from autolog.widgets import (
     CredentialsFrame,
     FileSelectorFrame,
     OptionsFrame,
+    ScrollableCTkOptionMenu,
     TargetsFrame,
     column_id,
 )
@@ -41,6 +46,11 @@ from autolog.worklog_processor import WorklogProcessor
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
+
+# CTk draws arrows and checkmarks from a bundled font that renders as raw
+# letters on some Linux setups; vector shapes do not depend on it.
+if sys.platform.startswith("linux"):
+    DrawEngine.preferred_drawing_method = "polygon_shapes"
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +86,9 @@ class WorklogApp(ctk.CTk):
         self.options_frame = OptionsFrame(self)
         self.options_frame.pack(pady=5, padx=10, fill="x")
 
-        self.targets_frame = TargetsFrame(self, self._apply_target_to_all)
+        self.targets_frame = TargetsFrame(
+            self, self._apply_target_to_all, self._resolve_targets
+        )
 
         self.file_frame = FileSelectorFrame(self, self._browse_file)
         self.file_frame.pack(pady=10, padx=10, fill="x")
@@ -88,39 +100,40 @@ class WorklogApp(ctk.CTk):
         """Configure the treeview for displaying worklog results."""
         treestyle = ttk.Style()
         treestyle.theme_use("default")
-        frame_bg_color = self._apply_appearance_mode(
-            ctk.ThemeManager.theme["CTkFrame"]["fg_color"]
-        )
-        input_bg_color = self._apply_appearance_mode(
-            ctk.ThemeManager.theme["CTkEntry"]["fg_color"]
-        )
-        text_color = self._apply_appearance_mode(
-            ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        )
-        selected_color = self._apply_appearance_mode(
-            ctk.ThemeManager.theme["CTkFrame"]["fg_color"]
-        )
+        theme = ctk.ThemeManager.theme
+        surface = self._apply_appearance_mode(theme["CTkFrame"]["fg_color"])
+        heading = self._apply_appearance_mode(theme["CTkFrame"]["top_fg_color"])
+        text_color = self._apply_appearance_mode(theme["CTkLabel"]["text_color"])
+        accent = self._apply_appearance_mode(theme["CTkButton"]["fg_color"])
+        accent_hover = self._apply_appearance_mode(theme["CTkButton"]["hover_color"])
+        accent_text = self._apply_appearance_mode(theme["CTkButton"]["text_color"])
 
         treestyle.configure(
             "Treeview",
-            background=frame_bg_color,
+            background=surface,
             foreground=text_color,
-            fieldbackground=frame_bg_color,
+            fieldbackground=surface,
+            rowheight=TABLE_ROW_HEIGHT,
             borderwidth=0,
         )
         treestyle.configure(
             "Treeview.Heading",
-            background=input_bg_color,
+            background=heading,
             foreground=text_color,
-            padding=(16, 8),
+            padding=(12, 8),
+            relief="flat",
             borderwidth=0,
         )
         treestyle.map(
             "Treeview",
-            foreground=[("selected", frame_bg_color)],
-            background=[("selected", selected_color)],
+            background=[("selected", accent)],
+            foreground=[("selected", accent_text)],
         )
-        treestyle.map("Treeview.Heading", background=[("active", selected_color)])
+        treestyle.map(
+            "Treeview.Heading",
+            background=[("active", accent_hover)],
+            foreground=[("active", accent_text)],
+        )
 
         self.tree = ttk.Treeview(self, show="headings")
         self.tree.pack(pady=10, padx=10, fill="both", expand=True)
@@ -275,12 +288,13 @@ class WorklogApp(ctk.CTk):
     def _row_values(self, entry: WorklogEntry) -> tuple:
         duration = f"{entry.duration // 3600}h {(entry.duration % 3600) // 60}m"
         targets = tuple(
-            getattr(entry, field.attr) or "⚠️ Missing" for field in self.target_fields
+            getattr(entry, field.attr) or f"{UNMATCHED_PREFIX}{entry.activity}"
+            for field in self.target_fields
         )
         return (
             entry.started.strftime("%Y-%m-%d %H:%M"),
             duration,
-            entry.issue_key or "⚠️ Missing",
+            entry.issue_key or f"{UNMATCHED_PREFIX}{entry.raw_issue_key}",
             *targets,
             STATUS_DISPLAY.get(entry.status, STATUS_DISPLAY["pending"]),
             "",
@@ -294,6 +308,7 @@ class WorklogApp(ctk.CTk):
 
     def _on_cell_double_click(self, event: tk.Event) -> None:
         """Handle double-click events for editing cells."""
+        self._cancel_edit()
         if self.tree.identify("region", event.x, event.y) != "cell":
             return
         col = self.tree.identify_column(event.x)
@@ -312,37 +327,57 @@ class WorklogApp(ctk.CTk):
     def _entry_for_row(self, row_id: str) -> WorklogEntry:
         return self.entries[self.tree.index(row_id)]
 
-    def _place_editor(self, widget: tk.Widget, row_id: str, column: str) -> None:
-        x, y, width, height = self.tree.bbox(row_id, column)
-        widget.place(x=x, y=y, width=width, height=height)
-        widget.bind("<FocusOut>", lambda e: self._cancel_edit())
-        widget.focus_set()
+    def _cell_bbox(self, row_id: str, column: str) -> tuple | None:
+        """Empty while the row is scrolled out of view."""
+        return self.tree.bbox(row_id, column) or None
+
+    def _place_editor(
+        self,
+        widget: tk.Widget,
+        x: int,
+        y: int,
+        dismiss_on_focus_out: bool = True,
+    ) -> None:
+        widget.place(x=x, y=y)
+        if dismiss_on_focus_out:
+            widget.bind("<FocusOut>", lambda e: self._cancel_edit())
+            widget.focus_set()
         self.editing_widget = widget
 
     def _edit_issue_cell(self, row_id: str, column: str) -> None:
         """Enable editing of an issue key cell."""
         entry = self._entry_for_row(row_id)
-        editor = ctk.CTkEntry(self.tree)
-        editor.insert(0, self.tree.set(row_id, "Issue"))
+        bbox = self._cell_bbox(row_id, column)
+        if not bbox:
+            return
+        x, y, width, height = bbox
+        editor = ctk.CTkEntry(self.tree, width=width, height=height)
+        editor.insert(0, entry.issue_key or "")
         editor.bind(
             "<Return>", lambda e: self._save_issue_edit(row_id, entry, editor.get())
         )
-        self._place_editor(editor, row_id, column)
+        self._place_editor(editor, x, y)
 
     def _edit_target_cell(self, row_id: str, column: str, field: TargetField) -> None:
         """Offer the destinations the consumer knows about for this entry."""
         entry = self._entry_for_row(row_id)
-        editor = ttk.Combobox(
+        choices = self.processor.consumer.choices(field, entry)
+        if not choices:
+            self._update_status("Nothing to choose from yet - press Refresh")
+            return
+        bbox = self._cell_bbox(row_id, column)
+        if not bbox:
+            return
+        x, y, width, height = bbox
+        editor = ScrollableCTkOptionMenu(
             self.tree,
-            values=self.processor.consumer.choices(field, entry),
-            state="readonly",
+            values=choices,
+            width=width,
+            height=height,
+            command=lambda value: self._save_target_edit(row_id, entry, field, value),
         )
-        editor.set(getattr(entry, field.attr) or "")
-        editor.bind(
-            "<<ComboboxSelected>>",
-            lambda e: self._save_target_edit(row_id, entry, field, editor.get()),
-        )
-        self._place_editor(editor, row_id, column)
+        editor.set(getattr(entry, field.attr) or choices[0])
+        self._place_editor(editor, x, y, dismiss_on_focus_out=False)
 
     def _save_issue_edit(self, row_id: str, entry: WorklogEntry, value: str) -> None:
         entry.issue_key = value.strip()
