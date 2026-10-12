@@ -51,12 +51,13 @@ Kimai files entries under a project and an activity instead of an issue key, so 
 
 After the file is loaded, AutoLog fetches your projects and activities and matches each entry against them, using the work item as a hint — an entry on `ACME-6055` lands on the `ACME` project, and `WIDGET-BaseImage` on `WIDGET` / `BaseImage`. Matching is fuzzy, so names do not have to line up exactly.
 
+Names that differ only in their numbers are never paired up, so an entry on `ABC-6061` will not quietly land on an `ABC-6055` activity. Anything left unmatched is marked with a `?` next to the text that was matched against, so you can see what the entry was and map it yourself, and it is refused at processing time rather than guessed at.
+
 You stay in control of the result:
 
 - Use the **Project** and **Activity** dropdowns above the file picker to apply one choice to every entry at once.
 - Double-click any **Project** or **Activity** cell to override a single entry. Changing a row's project re-matches its activity within that project.
-
-Anything left unmatched is flagged and skipped rather than guessed at.
+- **Refresh** re-fetches projects and activities from Kimai, filling only the gaps, so anything you mapped by hand is kept.
 
 ---
 
