@@ -1,12 +1,14 @@
 from pathlib import Path
 
 from .base import ProviderBase
+from .grindstone import GrindstoneProvider
 from .kimai import KimaiProvider
 from .odoo import OdooProvider
 
 _PROVIDERS = {
     "kimai": KimaiProvider,
     "odoo": OdooProvider,
+    "grindstone": GrindstoneProvider,
 }
 
 

@@ -1,0 +1,9 @@
+﻿Work Item,End,Start,Duration,Notes
+ACME-101,10/12/2026 10:14:41 AM,10/12/2026 9:02:11 AM,1:12:30,add retry to the upload queue
+Meetings,10/12/2026 11:00:00 AM,10/12/2026 10:15:00 AM,0:45:00,sprint planning
+ACME-101,10/12/2026 11:31:36 AM,10/12/2026 11:03:22 AM,0:28:14,
+ACME-118,10/12/2026 12:40:40 PM,10/12/2026 11:35:00 AM,1:05:40,fix off-by-one in the pager
+[WIDGET-42] Rework the exporter,10/12/2026 3:28:14 PM,10/12/2026 1:10:05 PM,2:18:09,
+[WIDGET] 57 Tidy up the build,10/12/2026 3:52:45 PM,10/12/2026 3:30:00 PM,0:22:45,drop the dead cmake flags
+Admin,10/12/2026 4:35:00 PM,10/12/2026 4:00:00 PM,0:35:00,timesheets and expenses
+ACME-101,10/12/2026 4:50:00 PM,10/12/2026 4:40:12 PM,0:09:48,follow-up on the upload queue

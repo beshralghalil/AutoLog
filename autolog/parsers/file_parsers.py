@@ -16,6 +16,7 @@ class FileParserBase:
     def read(cls, file_path: Path) -> list[dict]:
         """Return raw rows as list of dicts."""
         df = cls._reader(file_path, dtype=str).fillna("")
+        df.columns = [str(col).lstrip("\ufeff").strip() for col in df.columns]
         return df.to_dict(orient="records")
 
 
