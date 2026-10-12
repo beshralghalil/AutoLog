@@ -17,6 +17,9 @@ class WorklogEntry:
     timezone: Optional[str] = None
     raw_issue_key: str = None
     issue_key: str = None
+    project_key: str = None
+    target_project: str = None
+    target_activity: str = None
     status: str = "pending"
 
     _idx: int = 0
@@ -61,7 +64,9 @@ class WorklogEntry:
         def clean_text(text: str) -> str:
             return re.sub(r"\s+", " ", text.strip().lower())
 
-        comment_match = clean_text(self.description) == clean_text(other.description)
+        comment_match = clean_text(self.description or "") == clean_text(
+            other.description or ""
+        )
 
         return time_match and comment_match and duration_match
 

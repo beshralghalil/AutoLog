@@ -2,14 +2,20 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import customtkinter as ctk
 import pytz
 from customtkinter import ThemeManager
 
-from autolog.constants import ColumnID
+from autolog.consumers.base import CredentialField, TargetField
 from autolog.providers.factory import get_providers_names
+
+APPLY_TO_ALL_PLACEHOLDER = "— apply to all —"
+
+
+def column_id(tree: ttk.Treeview, name: str) -> str:
+    return f"#{list(tree['columns']).index(name) + 1}"
 
 
 class FileSelectorFrame(ctk.CTkFrame):
@@ -66,7 +72,7 @@ class CellTooltip:
     def _on_motion(self, event: tk.Event) -> None:
         col = self.widget.identify_column(event.x)
         row = self.widget.identify_row(event.y)
-        if col == ColumnID.ERROR.value and row:
+        if col == column_id(self.widget, "Error") and row:
             text = self.widget.set(row, "Error")
             if text and text != self.text:
                 self.text = text
@@ -98,32 +104,89 @@ class CellTooltip:
 
 
 class CredentialsFrame(ctk.CTkFrame):
-    """Frame containing credential input fields."""
+    """Frame containing the consumer selector and its credential fields."""
 
-    def __init__(self, master: ctk.CTk, **kwargs):
+    def __init__(
+        self,
+        master: ctk.CTk,
+        consumers: list[str],
+        consumer_callback: Callable[[str], None],
+        **kwargs,
+    ):
         super().__init__(master, **kwargs)
-        self.base_url_entry = ctk.CTkEntry(self, placeholder_text="Jira Base URL")
-        self.email_entry = ctk.CTkEntry(self, placeholder_text="Email")
-        self.api_key_entry = ctk.CTkEntry(self, placeholder_text="API Key", show="*")
-        self._layout()
-
-    def _layout(self) -> None:
-        self.base_url_entry.pack(side="left", padx=5, fill="x", expand=True)
-        self.email_entry.pack(side="left", padx=5, fill="x", expand=True)
-        self.api_key_entry.pack(side="left", padx=5, fill="x", expand=True)
+        self.consumer_var = ctk.StringVar(value=consumers[0])
+        self.consumer_selector = ctk.CTkOptionMenu(
+            self,
+            values=consumers,
+            variable=self.consumer_var,
+            width=100,
+            command=consumer_callback,
+        )
+        self.consumer_selector.pack(side="left", padx=5)
+        self.field_entries: Dict[str, ctk.CTkEntry] = {}
 
     @property
-    def credentials(self) -> Tuple[str, str, str]:
-        return (
-            self.base_url_entry.get().strip(),
-            self.email_entry.get().strip(),
-            self.api_key_entry.get().strip(),
-        )
+    def consumer_name(self) -> str:
+        return self.consumer_var.get()
 
-    def load_credentials(self, base_url: str, email: str, api_key: str) -> None:
-        self.base_url_entry.insert(0, base_url)
-        self.email_entry.insert(0, email)
-        self.api_key_entry.insert(0, api_key)
+    def set_fields(self, fields: Tuple[CredentialField, ...]) -> None:
+        for entry in self.field_entries.values():
+            entry.destroy()
+        self.field_entries = {}
+        for field in fields:
+            entry = ctk.CTkEntry(
+                self, placeholder_text=field.label, show="*" if field.secret else ""
+            )
+            entry.pack(side="left", padx=5, fill="x", expand=True)
+            self.field_entries[field.key] = entry
+
+    @property
+    def credentials(self) -> Dict[str, str]:
+        return {key: entry.get().strip() for key, entry in self.field_entries.items()}
+
+    def load_credentials(self, credentials: Dict[str, str]) -> None:
+        for key, value in credentials.items():
+            entry = self.field_entries.get(key)
+            if entry and value:
+                entry.delete(0, tk.END)
+                entry.insert(0, value)
+
+
+class TargetsFrame(ctk.CTkFrame):
+    """Lets the user push one destination choice onto every entry at once."""
+
+    def __init__(
+        self,
+        master: ctk.CTk,
+        apply_callback: Callable[[TargetField, str], None],
+        **kwargs,
+    ):
+        super().__init__(master, **kwargs)
+        self.apply_callback = apply_callback
+        self.widgets: list[ctk.CTkBaseClass] = []
+
+    def set_fields(
+        self, fields: Tuple[TargetField, ...], choices: Dict[str, list[str]]
+    ) -> None:
+        for widget in self.widgets:
+            widget.destroy()
+        self.widgets = []
+        for field in fields:
+            label = ctk.CTkLabel(self, text=f"{field.label}:")
+            selector = ScrollableCTkOptionMenu(
+                self,
+                values=[APPLY_TO_ALL_PLACEHOLDER, *choices.get(field.label, [])],
+                width=220,
+                command=lambda value, f=field: self._on_select(f, value),
+            )
+            selector.set(APPLY_TO_ALL_PLACEHOLDER)
+            label.pack(side="left", padx=(10, 2))
+            selector.pack(side="left", padx=5)
+            self.widgets += [label, selector]
+
+    def _on_select(self, field: TargetField, value: str) -> None:
+        if value != APPLY_TO_ALL_PLACEHOLDER:
+            self.apply_callback(field, value)
 
 
 class ScrollableDropdown(tk.Toplevel):

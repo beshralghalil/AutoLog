@@ -1,7 +1,7 @@
 [project]
 name = "autolog"
 version = "2.1.1"
-description = "automates the process of logging work entries into Jira"
+description = "automates the process of logging work entries into Jira and Kimai"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.2.3",
     "python-dateutil>=2.9.0.post0",
     "pytz>=2025.2",
+    "requests>=2.32.3",
 ]
 
 [dependency-groups]

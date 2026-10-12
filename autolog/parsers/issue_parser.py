@@ -18,3 +18,8 @@ class IssueKeyParser:
                 # group(1) is project (letters+digits), group(2) is number
                 return f"{m.group(1)}-{m.group(2)}"
         return None
+
+    @staticmethod
+    def parse_project(activity: str) -> str | None:
+        key = IssueKeyParser.parse(activity)
+        return key.split("-")[0] if key else None
