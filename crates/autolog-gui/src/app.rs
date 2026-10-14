@@ -125,6 +125,12 @@ pub struct Editing {
     pub id: EntryId,
     pub column: ColumnKey,
     pub buffer: String,
+    /// Whether the caret has been put in the box yet.
+    ///
+    /// Asking for focus once is the whole point: asking again every frame
+    /// would take it straight back each time the user clicked away, leaving a
+    /// field they could never leave.
+    pub focused: bool,
 }
 
 #[expect(
@@ -425,21 +431,20 @@ impl AutoLogApp {
         let secrets = Arc::clone(&self.secrets);
         let id = consumer_id.to_owned();
         self.tasks.spawn_blocking(move || {
-            let values = spec
+            let result = spec
                 .credentials
                 .iter()
                 .filter(|field| field.secret)
                 .map(|field| {
-                    (
-                        field.key.to_owned(),
-                        secrets.get(&id, field.key).expose().to_owned(),
-                    )
+                    secrets
+                        .try_get(&id, field.key)
+                        .map(|found| (field.key.to_owned(), found.expose().to_owned()))
                 })
                 .collect();
 
             Message::CredentialsLoaded {
                 consumer_id: id,
-                values,
+                result,
             }
         });
     }
@@ -888,16 +893,29 @@ impl AutoLogApp {
             Message::RunFailed(error) => self.modal = Some(Modal::Error(error)),
             Message::CredentialsLoaded {
                 consumer_id,
-                values,
-            } => {
-                let form = self.forms.entry(consumer_id.clone()).or_default();
-                for (field, value) in values {
-                    // Anything the user has typed in the meantime wins over
-                    // what was stored.
-                    form.entry(field).or_insert(value);
+                result,
+            } => match result {
+                Ok(values) => {
+                    let form = self.forms.entry(consumer_id.clone()).or_default();
+                    for (field, value) in values {
+                        // Anything the user has typed in the meantime wins
+                        // over what was stored.
+                        form.entry(field).or_insert(value);
+                    }
+                    self.secrets_loaded.insert(consumer_id);
                 }
-                self.secrets_loaded.insert(consumer_id);
-            }
+                Err(error) => {
+                    // The consumer is deliberately left out of `secrets_loaded`,
+                    // so nothing will be written over a token that is there but
+                    // unreadable.
+                    tracing::warn!(consumer = %consumer_id, "{error}");
+                    let shown = error.to_user_error();
+                    self.notify(
+                        NoticeKind::Warning,
+                        format!("{} {}", shown.message, shown.hint.unwrap_or_default()),
+                    );
+                }
+            },
         }
     }
 

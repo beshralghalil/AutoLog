@@ -114,6 +114,7 @@ pub fn searchable_combo(
         accepts,
     } = combo;
     let id = ui.make_persistent_id(&id_salt);
+    let focus_id = id.with("filter-opened-on");
     let mut picked = None;
 
     let label = selected.unwrap_or(placeholder);
@@ -143,11 +144,17 @@ pub fn searchable_combo(
                     .desired_width(f32::INFINITY),
             );
 
-            // Nothing else in here wants the keyboard, so the filter keeps it
-            // for as long as the list is open.
-            if !search.has_focus() {
+            // Put the caret in the filter as the list opens, and only then:
+            // asking every frame would take focus back from anything else the
+            // user clicked, and would stop them leaving the box at all.
+            //
+            // "Just opened" means this body did not run on the previous pass.
+            let pass = ui.ctx().cumulative_pass_nr();
+            let opened_on = ui.data(|data| data.get_temp::<u64>(focus_id));
+            if opened_on != Some(pass.wrapping_sub(1)) {
                 search.request_focus();
             }
+            ui.data_mut(|data| data.insert_temp(focus_id, pass));
             if search.changed() {
                 ui.data_mut(|data| data.insert_temp(id, filter.clone()));
             }

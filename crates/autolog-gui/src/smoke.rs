@@ -275,6 +275,7 @@ fn a_row_being_edited_draws() {
         id: 1,
         column: crate::app::ColumnKey::Issue,
         buffer: "ABC-1".to_owned(),
+        focused: false,
     });
     draw(&mut app, &ctx, 2);
 
@@ -339,6 +340,73 @@ fn quitting_before_the_token_is_read_does_not_delete_it() {
     app.form_mut().insert("api_key".to_owned(), String::new());
     app.save_credentials();
     assert!(app.secrets.get(&consumer, "api_key").is_empty());
+}
+
+/// Starting up has to fill the form by itself, with nothing asked of it.
+#[test]
+fn a_stored_token_is_fetched_on_startup() {
+    let ctx = context();
+    let mut app = app(&ctx);
+    let consumer = app.settings.consumer.clone();
+    let secret = app
+        .consumer_spec()
+        .credentials
+        .iter()
+        .find(|field| field.secret)
+        .expect("every tracker needs a token")
+        .key;
+
+    app.secrets
+        .set(&consumer, secret, &Secret::new("stored-token"))
+        .unwrap();
+
+    // No call to load_credentials: the first frame has to ask for itself.
+    for _ in 0..200 {
+        draw(&mut app, &ctx, 1);
+        if app.secrets_loaded.contains(&consumer) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert_eq!(app.form_value(secret), "stored-token");
+}
+
+/// The whole path a saved token takes to reach the form.
+#[test]
+fn a_stored_token_reaches_the_credentials_form() {
+    let ctx = context();
+    let mut app = app(&ctx);
+    let consumer = app.settings.consumer.clone();
+    let secret = app
+        .consumer_spec()
+        .credentials
+        .iter()
+        .find(|field| field.secret)
+        .expect("every tracker needs a token")
+        .key;
+
+    app.secrets
+        .set(&consumer, secret, &Secret::new("stored-token"))
+        .unwrap();
+
+    app.load_credentials(&consumer);
+
+    // The read runs off the painting thread, so wait for it the way the
+    // window does: by drawing frames until it lands.
+    for _ in 0..200 {
+        draw(&mut app, &ctx, 1);
+        if app.secrets_loaded.contains(&consumer) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert!(
+        app.secrets_loaded.contains(&consumer),
+        "the read never came back"
+    );
+    assert_eq!(app.form_value(secret), "stored-token");
 }
 
 #[test]

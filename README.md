@@ -69,7 +69,17 @@ never written to the settings file. Everything else you pick, including which co
 time you open AutoLog.
 
 If no credential store can be reached, AutoLog says so and keeps the tokens for that session only, rather than writing them
-somewhere it controls.
+somewhere it controls. A store that exists but will not answer — a Linux keyring nobody has unlocked yet, most often — is
+reported as a warning rather than read as an empty one, so a token you still have is never saved over.
+
+To see what your machine's credential store is doing:
+
+```bash
+cargo run -p autolog-core --example keyring_check
+```
+
+It writes, reads back and deletes one throwaway entry, then reports whether each tracker's token is present. Values are
+never printed.
 
 ### Deciding where each entry goes
 

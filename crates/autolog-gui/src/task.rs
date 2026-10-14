@@ -35,7 +35,10 @@ pub enum Message {
     /// Credentials were read out of the system store.
     CredentialsLoaded {
         consumer_id: String,
-        values: Vec<(String, String)>,
+        /// The stored values, or why the store would not give them up. A
+        /// store that cannot be read is not the same as one holding nothing,
+        /// and only the latter is safe to save over.
+        result: Result<Vec<(String, String)>, autolog_core::secrets::SecretError>,
     },
 }
 

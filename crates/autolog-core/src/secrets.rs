@@ -137,26 +137,43 @@ impl SecretStore {
     }
 
     /// Read a saved secret, falling back to what the Python version stored.
-    pub fn get(&self, consumer: &str, field: &str) -> Secret {
+    ///
+    /// A secret that is not there comes back empty. A store that cannot be
+    /// read — a keyring nobody has unlocked yet, most often — is an error
+    /// rather than an empty value, because the two are easy to confuse and
+    /// the consequences differ: saving over the first is what the user asked
+    /// for, saving over the second destroys a token they still have.
+    pub fn try_get(&self, consumer: &str, field: &str) -> Result<Secret, SecretError> {
         let key = key(consumer, field);
 
         if self.unavailable.is_some() {
-            return self
+            return Ok(self
                 .session
                 .lock()
                 .map(|session| session.get(&key).cloned().unwrap_or_default())
-                .unwrap_or_default();
+                .unwrap_or_default());
         }
 
-        read(SERVICE, &key)
-            .or_else(|| read(LEGACY_SERVICE, &key))
-            .or_else(|| {
-                // Credentials saved before consumers were namespaced.
-                (consumer == "jira")
-                    .then(|| read(LEGACY_SERVICE, field))
-                    .flatten()
-            })
-            .unwrap_or_default()
+        if let Some(found) = read(SERVICE, &key)? {
+            return Ok(found);
+        }
+        if let Some(found) = read(LEGACY_SERVICE, &key)? {
+            return Ok(found);
+        }
+        // Credentials saved before consumers were namespaced.
+        if consumer == "jira"
+            && let Some(found) = read(LEGACY_SERVICE, field)?
+        {
+            return Ok(found);
+        }
+
+        Ok(Secret::default())
+    }
+
+    /// As [`Self::try_get`], for callers with nothing useful to do about a
+    /// store that will not answer.
+    pub fn get(&self, consumer: &str, field: &str) -> Secret {
+        self.try_get(consumer, field).unwrap_or_default()
     }
 
     /// Save a secret, or forget it when the value is blank.
@@ -195,14 +212,18 @@ fn key(consumer: &str, field: &str) -> String {
     format!("{consumer}.{field}")
 }
 
-fn read(service: &str, key: &str) -> Option<Secret> {
-    let entry = keyring::Entry::new(service, key).ok()?;
+/// `Ok(None)` means there is no such entry; `Err` means the store would not
+/// say either way.
+fn read(service: &str, key: &str) -> Result<Option<Secret>, SecretError> {
+    let entry = keyring::Entry::new(service, key)
+        .map_err(|error| SecretError::Refused(error.to_string()))?;
+
     match entry.get_password() {
-        Ok(password) => Some(Secret::new(password)),
-        Err(keyring::Error::NoEntry) => None,
+        Ok(password) => Ok(Some(Secret::new(password))),
+        Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => {
-            tracing::debug!(service, "could not read a saved credential: {error}");
-            None
+            tracing::warn!(service, "could not read a saved credential: {error}");
+            Err(SecretError::Refused(error.to_string()))
         }
     }
 }
@@ -244,5 +265,16 @@ mod tests {
         store.set("kimai", "api_token", &Secret::default()).unwrap();
         assert!(store.get("kimai", "api_token").is_empty());
         assert!(store.unavailable().is_some());
+    }
+
+    /// A field nobody has saved reads as empty rather than as a failure, so
+    /// the first run of the app does not open with a warning.
+    #[test]
+    fn a_secret_that_was_never_saved_is_empty_not_an_error() {
+        let store = SecretStore::in_memory();
+        let found = store
+            .try_get("kimai", "api_token")
+            .expect("an absent secret is not a failure");
+        assert!(found.is_empty());
     }
 }

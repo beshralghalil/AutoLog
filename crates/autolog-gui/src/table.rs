@@ -223,7 +223,11 @@ impl AutoLogApp {
                     .desired_width(f32::INFINITY)
                     .hint_text("ABC-123"),
             );
-            response.request_focus();
+
+            if !edit.focused {
+                response.request_focus();
+                edit.focused = true;
+            }
 
             if response.lost_focus() {
                 actions.push(if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
@@ -396,7 +400,12 @@ impl AutoLogApp {
             Action::Sort(column) => self.toggle_sort(column),
             Action::Retarget(id, field, value) => self.retarget(id, &field, &value),
             Action::BeginEdit(id, column, buffer) => {
-                self.editing = Some(Editing { id, column, buffer });
+                self.editing = Some(Editing {
+                    id,
+                    column,
+                    buffer,
+                    focused: false,
+                });
             }
             Action::CommitEdit => {
                 if let Some(edit) = self.editing.take() {
