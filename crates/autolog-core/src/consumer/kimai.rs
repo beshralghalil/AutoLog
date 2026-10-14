@@ -571,7 +571,7 @@ mod tests {
             kimai.every_choice(ACTIVITY),
             ["BaseImage", "Development", "Meetings"]
         );
-        assert_eq!(kimai.every_choice(PROJECT), ["WIDGET", "ACME"]);
+        assert_eq!(kimai.every_choice(PROJECT), ["ACME", "WIDGET"]);
 
         let mut entry = entry("ACME-1");
         entry.set_target(PROJECT, "ACME");

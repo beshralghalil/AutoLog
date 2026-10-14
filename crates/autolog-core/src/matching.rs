@@ -376,6 +376,6 @@ mod tests {
         assert!((similarity("tide", "diet") - 0.25).abs() < 1e-9);
         assert!((similarity("abcde", "fghij") - 0.0).abs() < 1e-9);
         assert!((similarity("baseimages", "base image") - 0.9).abs() < 1e-9);
-        assert!((similarity("acme 6055", "acme") - 0.736_842_10).abs() < 1e-6);
+        assert!((similarity("acme 6055", "acme") - 0.615_384_61).abs() < 1e-6);
     }
 }

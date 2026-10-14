@@ -70,10 +70,7 @@ mod tests {
 
     #[test]
     fn the_project_is_the_half_before_the_dash() {
-        assert_eq!(
-            parse_project("[ACME-6055] work"),
-            Some("ACME".to_owned())
-        );
+        assert_eq!(parse_project("[ACME-6055] work"), Some("ACME".to_owned()));
         assert_eq!(parse_project("Meetings"), None);
     }
 }
