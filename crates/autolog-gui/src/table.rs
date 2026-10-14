@@ -6,7 +6,7 @@
 //! mostly fixing a handful of rows and that should take one click each.
 
 use autolog_core::model::{EntryId, EntryStatus, WorklogEntry};
-use egui::{Align, Layout, RichText, Sense, Ui};
+use egui::{Align, Color32, Layout, RichText, Sense, Stroke, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::{AutoLogApp, ColumnKey, Editing, Modal};
@@ -136,16 +136,19 @@ impl AutoLogApp {
 
     /// The columns to draw, in order.
     fn table_columns(&self) -> Vec<ColumnKey> {
-        let mut columns = vec![
-            ColumnKey::Status,
-            ColumnKey::Started,
-            ColumnKey::Duration,
-            ColumnKey::Issue,
-        ];
+        let targets = self.consumer_spec().targets;
+
+        let mut columns = vec![ColumnKey::Status, ColumnKey::Started, ColumnKey::Duration];
+
+        // Where the tracker owns the issue as a destination of its own, that
+        // column is the issue; showing the key parsed out of the file beside
+        // it would be two columns saying nearly the same thing.
+        if !targets.iter().any(|field| field.key == "issue") {
+            columns.push(ColumnKey::Issue);
+        }
 
         columns.extend(
-            self.consumer_spec()
-                .targets
+            targets
                 .iter()
                 .map(|field| ColumnKey::Target(field.key.to_owned())),
         );
@@ -233,31 +236,34 @@ impl AutoLogApp {
         }
 
         let editable = entry.status != EntryStatus::Success;
-        let (text, color) = match entry.issue_key.as_deref() {
-            Some(key) => (key.to_owned(), palette.text),
-            None => (unmatched(&entry.raw_issue_key), palette.warning),
-        };
+        let found = entry.issue_key.is_some();
+        // With no key found, show the text it was looked for in: that is what
+        // the user has to work from, and it is what they are about to edit.
+        let text = entry
+            .issue_key
+            .clone()
+            .unwrap_or_else(|| entry.raw_issue_key.clone());
 
-        let label = ui.add(egui::Label::new(RichText::new(&text).color(color)).sense(
-            if editable {
-                Sense::click()
-            } else {
-                Sense::hover()
-            },
-        ));
+        let response = editable_cell(
+            ui,
+            palette,
+            &text,
+            if found { palette.text } else { palette.warning },
+            editable,
+        );
 
-        let label = label.on_hover_text(if editable {
-            format!("{}\n\nClick to edit", entry.raw_issue_key)
-        } else {
-            entry.raw_issue_key.clone()
+        let response = response.on_hover_text(match (found, editable) {
+            (true, true) => format!("{}\n\nClick to edit", entry.raw_issue_key),
+            (true, false) => entry.raw_issue_key.clone(),
+            (false, true) => format!(
+                "No issue key found in:\n{}\n\nClick to type one, like ABC-123",
+                entry.raw_issue_key
+            ),
+            (false, false) => format!("No issue key found in:\n{}", entry.raw_issue_key),
         });
 
-        if editable && label.clicked() {
-            actions.push(Action::BeginEdit(
-                entry.id,
-                ColumnKey::Issue,
-                entry.issue_key.clone().unwrap_or_default(),
-            ));
+        if editable && response.clicked() {
+            actions.push(Action::BeginEdit(entry.id, ColumnKey::Issue, text));
         }
     }
 
@@ -281,15 +287,29 @@ impl AutoLogApp {
 
         let choices = consumer.choices(field, entry);
         let width = ui.available_width();
+        let spec = self.consumer_spec().target(field);
+
+        // The list is the whole truth for a Kimai project; for a Jira issue it
+        // is only what the search happened to return, so anything can be typed.
+        let accepts = if spec.is_some_and(|spec| spec.key == "issue") {
+            widgets::Accepts::AnythingTyped
+        } else {
+            widgets::Accepts::ListedOnly
+        };
+
+        let label = spec.map_or("value", |spec| spec.label).to_lowercase();
 
         if let Some(picked) = widgets::searchable_combo(
             ui,
             palette,
             ("target", entry.id, field),
-            entry.target(field),
-            &choices,
-            &unmatched(&entry.activity),
-            width,
+            widgets::Combo {
+                selected: entry.target(field),
+                choices: &choices,
+                placeholder: &format!("Pick a {label}"),
+                width,
+                accepts,
+            },
         ) {
             actions.push(Action::Retarget(
                 entry.id,
@@ -389,14 +409,54 @@ impl AutoLogApp {
     }
 }
 
-/// Text shown where nothing was matched: the thing that was matched against,
-/// marked so it reads as a question rather than an answer.
-fn unmatched(source: &str) -> String {
-    if source.trim().is_empty() {
-        "? (blank)".to_owned()
+/// A cell that reads as a field you can type into, rather than as a label.
+///
+/// The old build marked unresolved cells by sticking a `?` on the front of the
+/// text, which left the table looking full of broken values. The frame and the
+/// colour carry that meaning now, and the text stays the text.
+fn editable_cell(
+    ui: &mut Ui,
+    palette: &Palette,
+    text: &str,
+    color: Color32,
+    editable: bool,
+) -> egui::Response {
+    let sense = if editable {
+        Sense::click()
     } else {
-        format!("? {source}")
+        Sense::hover()
+    };
+    let height = (ui.available_height() - 4.0).max(22.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
+
+    if ui.is_rect_visible(rect) {
+        let radius = egui::CornerRadius::same(5);
+        if editable {
+            let stroke = if response.hovered() {
+                Stroke::new(1.0, palette.accent)
+            } else {
+                Stroke::new(1.0, palette.border)
+            };
+            ui.painter().rect_filled(rect, radius, palette.surface);
+            ui.painter()
+                .rect_stroke(rect, radius, stroke, egui::StrokeKind::Inside);
+        }
+
+        let shown = if text.trim().is_empty() { "-" } else { text };
+        let galley = ui.painter().layout(
+            shown.to_owned(),
+            egui::FontId::proportional(13.0),
+            color,
+            rect.width() - 16.0,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
     }
+
+    response
 }
 
 fn heading(column: &ColumnKey) -> String {

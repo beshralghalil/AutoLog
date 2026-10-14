@@ -11,6 +11,7 @@ use autolog_core::EntryStatus;
 use autolog_core::config::Settings;
 use autolog_core::error::UserError;
 use autolog_core::pipeline::Summary;
+use autolog_core::secrets::Secret;
 use autolog_core::source::{self, SkippedRow};
 use chrono_tz::Tz;
 use eframe::App as _;
@@ -24,12 +25,13 @@ fn sample(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// An app with nothing of the developer's own settings in it.
+/// An app with nothing of the developer's own settings or credentials in it.
 fn app(ctx: &Context) -> AutoLogApp {
     let mut app = AutoLogApp::new(ctx, None).expect("the app should start");
     app.settings = Settings::default();
-    // Nothing in a test may write over the real settings file.
+    // Nothing in a test may write over the real settings file or keyring.
     app.settings_dirty = false;
+    app.secrets = std::sync::Arc::new(autolog_core::secrets::SecretStore::in_memory());
     app
 }
 
@@ -91,9 +93,9 @@ fn the_window_draws_a_loaded_file() {
     let mut app = with_entries(&ctx, "grindstone", "grindstone.csv");
     draw(&mut app, &ctx, 2);
 
-    assert_eq!(app.entries.len(), 6);
-    assert_eq!(app.view.len(), 6, "every row is visible with no filter set");
-    assert_eq!(app.submittable(), 6);
+    assert_eq!(app.entries.len(), 8);
+    assert_eq!(app.view.len(), 8, "every row is visible with no filter set");
+    assert_eq!(app.submittable(), 8);
 }
 
 #[test]
@@ -122,7 +124,7 @@ fn searching_and_filtering_narrow_the_rows_drawn() {
     let ctx = context();
     let mut app = with_entries(&ctx, "grindstone", "grindstone.csv");
 
-    app.search = "6061".to_owned();
+    app.search = "ACME-118".to_owned();
     app.mark_view_dirty();
     draw(&mut app, &ctx, 1);
     assert_eq!(app.view.len(), 1);
@@ -136,7 +138,7 @@ fn searching_and_filtering_narrow_the_rows_drawn() {
     app.filters.clear();
     app.mark_view_dirty();
     draw(&mut app, &ctx, 1);
-    assert_eq!(app.view.len(), 6);
+    assert_eq!(app.view.len(), 8);
 }
 
 #[test]
@@ -172,7 +174,7 @@ fn sorting_by_every_column_draws() {
     ] {
         app.toggle_sort(column);
         draw(&mut app, &ctx, 1);
-        assert_eq!(app.view.len(), 6);
+        assert_eq!(app.view.len(), 8);
     }
 }
 
@@ -251,7 +253,18 @@ fn notices_draw_and_then_expire() {
     app.notify(NoticeKind::Info, "Stopping after the entries in flight.");
 
     draw(&mut app, &ctx, 2);
-    assert_eq!(app.notices.len(), 3);
+
+    // There may be one more: a store that keeps secrets in memory says so.
+    for raised in [
+        "Loaded 6 entries.",
+        "3 rows could not be read.",
+        "Stopping after the entries in flight.",
+    ] {
+        assert!(
+            app.notices.iter().any(|notice| notice.text == raised),
+            "{raised} should still be on screen"
+        );
+    }
 }
 
 #[test]
@@ -293,6 +306,39 @@ fn a_row_at_every_status_draws() {
     app.mark_view_dirty();
     draw(&mut app, &ctx, 2);
     assert_eq!(app.view.len(), 20);
+}
+
+/// Reading the stored token happens off the painting thread. Saving before it
+/// lands used to write the empty form back, which deleted the token the user
+/// had never touched.
+#[test]
+fn quitting_before_the_token_is_read_does_not_delete_it() {
+    let ctx = context();
+    let mut app = app(&ctx);
+    let consumer = app.settings.consumer.clone();
+
+    app.secrets
+        .set(&consumer, "api_key", &Secret::new("a-real-token"))
+        .unwrap();
+
+    // The form is still empty: the keyring read has not come back.
+    app.save_credentials();
+    assert_eq!(
+        app.secrets.get(&consumer, "api_key").expose(),
+        "a-real-token"
+    );
+
+    // Once it has, the form is authoritative again.
+    app.secrets_loaded.insert(consumer.clone());
+    app.form_mut()
+        .insert("api_key".to_owned(), "typed".to_owned());
+    app.save_credentials();
+    assert_eq!(app.secrets.get(&consumer, "api_key").expose(), "typed");
+
+    // Including when the user empties it on purpose.
+    app.form_mut().insert("api_key".to_owned(), String::new());
+    app.save_credentials();
+    assert!(app.secrets.get(&consumer, "api_key").is_empty());
 }
 
 #[test]

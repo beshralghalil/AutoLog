@@ -50,9 +50,9 @@ pub static SPEC: ConsumerSpec = ConsumerSpec {
         TargetFieldSpec {
             key: PROJECT,
             label: "Project",
-            about: "Matched from the issue's project key. Exact by default: a project is a \
-                    hard fact, and landing work on the wrong one is hard to notice.",
-            default_strategy: MatchStrategy::Exact,
+            about: "Matched from the work item, which usually names the project in its \
+                    key. Narrows which activities the row can use.",
+            default_strategy: MatchStrategy::Contains,
             hints: &[Hint::ProjectKey, Hint::RawIssue, Hint::Activity],
             scoped_by: None,
         },
@@ -539,21 +539,27 @@ mod tests {
         assert_eq!(entries[0].target(ACTIVITY), Some("BaseImage"));
     }
 
-    /// The cost of matching a project exactly: a work item that is not an
-    /// issue key names no project, and the row waits for the user rather than
-    /// landing somewhere plausible.
+    /// By default a project is found wherever its name appears whole in the
+    /// work item, so a row that is not a tidy issue key still lands.
     #[test]
-    fn a_work_item_that_is_not_an_issue_key_names_no_project() {
+    fn a_work_item_that_is_not_an_issue_key_still_finds_its_project() {
         let kimai = kimai();
         let mut entries = vec![entry("WIDGET-BaseImage")];
         kimai.assign(&mut entries, &strategies());
-        assert_eq!(entries[0].target(PROJECT), None);
-
-        let mut loose = strategies();
-        loose.insert(PROJECT.to_owned(), MatchStrategy::Contains);
-        let mut entries = vec![entry("WIDGET-BaseImage")];
-        kimai.assign(&mut entries, &loose);
         assert_eq!(entries[0].target(PROJECT), Some("WIDGET"));
+    }
+
+    /// Tightening the field to Exact is still available, and then only a work
+    /// item naming the project outright will do.
+    #[test]
+    fn exact_matching_declines_a_work_item_that_merely_contains_the_name() {
+        let kimai = kimai();
+        let mut strict = strategies();
+        strict.insert(PROJECT.to_owned(), MatchStrategy::Exact);
+
+        let mut entries = vec![entry("WIDGET-BaseImage")];
+        kimai.assign(&mut entries, &strict);
+        assert_eq!(entries[0].target(PROJECT), None);
     }
 
     /// A bulk pick has to suit rows on different projects, so it is offered

@@ -297,6 +297,11 @@ impl AutoLogApp {
                     selected,
                     palette.status(status),
                 )
+                .on_hover_text(if selected {
+                    "Click to stop filtering by this"
+                } else {
+                    "Click to show only these"
+                })
                 .clicked()
                 {
                     if selected {
@@ -359,10 +364,13 @@ impl AutoLogApp {
                 ui,
                 palette,
                 ("bulk", field.key),
-                None,
-                &choices,
-                &format!("Set {} for {scope}", field.label.to_lowercase()),
-                200.0,
+                widgets::Combo {
+                    selected: None,
+                    choices: &choices,
+                    placeholder: &format!("Set {} for {scope}", field.label.to_lowercase()),
+                    width: 220.0,
+                    accepts: widgets::Accepts::ListedOnly,
+                },
             ) {
                 self.retarget_many(field.key, &picked.unwrap_or_default());
             }
@@ -401,44 +409,96 @@ impl AutoLogApp {
 
     // ----- the bar at the bottom ---------------------------------------------
 
-    pub fn show_footer(&mut self, ui: &mut Ui, palette: &Palette) {
-        if let Some(run) = &self.run {
-            let remaining = run.remaining();
-            let fraction = run.fraction();
-            let (done, total) = (run.done, run.total);
+    /// A full-width bar while a run is going, so progress is readable from
+    /// across the desk rather than squeezed into a corner.
+    fn show_progress(&mut self, ui: &mut Ui, palette: &Palette) {
+        let Some(run) = &self.run else {
+            return;
+        };
 
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .desired_width(ui.available_width() - 150.0)
-                        .fill(palette.accent)
-                        .text(format!("{done} / {total}")),
-                );
-                if let Some(remaining) = remaining {
-                    widgets::hint(ui, palette, format!("about {}s left", remaining.as_secs()));
-                }
-            });
-            ui.add_space(4.0);
+        let remaining = run.remaining();
+        let fraction = run.fraction();
+        let (done, total) = (run.done, run.total);
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a percentage of a clamped fraction fits"
+        )]
+        let percent = (fraction * 100.0).round().max(0.0) as u32;
+
+        let caption = match remaining {
+            Some(left) => format!(
+                "{done} of {total} posted - {percent}%, about {}s left",
+                left.as_secs()
+            ),
+            None => format!("{done} of {total} posted - {percent}%"),
+        };
+
+        ui.add(
+            egui::ProgressBar::new(fraction)
+                .desired_width(ui.available_width())
+                .desired_height(22.0)
+                .corner_radius(egui::CornerRadius::same(6))
+                .fill(palette.accent)
+                .text(RichText::new(caption).color(palette.on_accent).size(12.0)),
+        );
+        ui.add_space(6.0);
+    }
+
+    /// Duplicate checking is the setting people most want to reach for, so it
+    /// is here as well as in Settings rather than only buried in it.
+    fn show_duplicate_toggle(&mut self, ui: &mut Ui, palette: &Palette) {
+        let on = self.settings.prevent_duplicates;
+        let (text, color) = if on {
+            ("Skipping duplicates", palette.info)
+        } else {
+            ("Duplicates not checked", palette.warning)
+        };
+
+        if widgets::filter_chip(ui, palette, text, 0, on, color)
+            .on_hover_text(if on {
+                "Reading back what the tracker already has, and skipping anything that matches.\nClick to turn off."
+            } else {
+                "Entries will be posted without checking whether the tracker already has them.\nClick to turn on."
+            })
+            .clicked()
+        {
+            self.settings.prevent_duplicates = !on;
+            self.settings_dirty = true;
         }
+    }
+
+    pub fn show_footer(&mut self, ui: &mut Ui, palette: &Palette) {
+        self.show_progress(ui, palette);
 
         ui.horizontal(|ui| {
             ui.add_space(2.0);
             if self.entries.is_empty() {
                 widgets::hint(ui, palette, "Nothing loaded");
             } else {
+                // The total is the number people come here to check, so it is
+                // the biggest thing on the bar rather than a footnote.
+                ui.label(
+                    RichText::new(format_total(self.total_seconds))
+                        .color(palette.accent)
+                        .size(20.0)
+                        .strong(),
+                )
+                .on_hover_text("Total length of every entry in the file");
+                ui.label(RichText::new("hours").size(12.0).color(palette.text_muted));
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
                 ui.label(
                     RichText::new(format!("{} entries", self.entries.len()))
                         .color(palette.text)
-                        .size(12.0),
+                        .size(13.0),
                 );
-                widgets::hint(
-                    ui,
-                    palette,
-                    format!("{} total", format_total(self.total_seconds)),
-                );
-                if self.settings.prevent_duplicates {
-                    widgets::chip(ui, "duplicate check on", palette.info);
-                }
+
+                ui.add_space(4.0);
+                self.show_duplicate_toggle(ui, palette);
             }
 
             widgets::trailing(ui, |ui| {

@@ -117,6 +117,19 @@ impl SecretStore {
         }
     }
 
+    /// A store that keeps secrets for this process only.
+    ///
+    /// Used by tests, and by anything that must not touch the user's real
+    /// keyring.
+    pub fn in_memory() -> Self {
+        Self {
+            unavailable: Some(SecretError::Unavailable(
+                "this store was asked to stay in memory".to_owned(),
+            )),
+            session: Mutex::new(HashMap::new()),
+        }
+    }
+
     /// The reason secrets will not be remembered, if that is the case. The GUI
     /// shows this once rather than failing silently.
     pub fn unavailable(&self) -> Option<&SecretError> {
@@ -220,10 +233,7 @@ mod tests {
     /// Without a system store the API still works; it just forgets at exit.
     #[test]
     fn the_session_fallback_round_trips() {
-        let store = SecretStore {
-            unavailable: Some(SecretError::Unavailable("test".to_owned())),
-            session: Mutex::new(HashMap::new()),
-        };
+        let store = SecretStore::in_memory();
 
         assert!(store.get("kimai", "api_token").is_empty());
         store

@@ -28,26 +28,28 @@ fn the_grindstone_sample_loads_whole() {
     .expect("the sample should load");
 
     assert!(loaded.skipped.is_empty(), "{:?}", loaded.skipped);
-    assert_eq!(loaded.entries.len(), 6);
+    assert_eq!(loaded.entries.len(), 8);
     assert_eq!(
         loaded.columns,
         ["Work Item", "End", "Start", "Duration", "Notes"]
     );
+    assert_eq!(loaded.total_seconds, 25_026);
 
     let first = &loaded.entries[0];
-    assert_eq!(first.issue_key.as_deref(), Some("ACME-6055"));
-    assert_eq!(first.duration, 3604);
-    assert_eq!(first.started.to_string(), "2026-10-12 10:00:25 +03");
-    assert_eq!(first.description, "rename upload-queue to upload-worker");
+    assert_eq!(first.issue_key.as_deref(), Some("ACME-101"));
+    assert_eq!(first.project_key.as_deref(), Some("ACME"));
+    assert_eq!(first.duration, 4350);
+    assert_eq!(first.started.to_string(), "2026-10-12 09:02:11 +03");
+    assert_eq!(first.description, "add retry to the upload queue");
 
-    // The meeting has no issue key, and is left for the user rather than guessed.
+    // A meeting has no issue key, and is left for the user rather than guessed.
     assert_eq!(loaded.entries[1].issue_key, None);
     assert_eq!(loaded.entries[1].activity, "Meetings");
 
-    // `WIDGET-BaseImage` is not an issue key either: the half after the dash
-    // has to be a number for a key to be read out of it.
-    assert_eq!(loaded.entries[4].issue_key, None);
-    assert_eq!(loaded.entries[4].duration, 2 * 3600 + 38 * 60 + 5);
+    // The sample carries each shape a key gets written in, so the reader's
+    // handling of all three stays covered.
+    assert_eq!(loaded.entries[4].issue_key.as_deref(), Some("WIDGET-42"));
+    assert_eq!(loaded.entries[5].issue_key.as_deref(), Some("WIDGET-57"));
 }
 
 #[test]
@@ -139,8 +141,8 @@ fn loaded_entries_can_be_matched_against_a_trackers_names() {
     );
     assert_eq!(
         strategies.get(kimai::PROJECT),
-        Some(&MatchStrategy::Exact),
-        "a Kimai project matches exactly unless the user says otherwise"
+        Some(&MatchStrategy::Contains),
+        "a Kimai project is found where the work item names it"
     );
 }
 

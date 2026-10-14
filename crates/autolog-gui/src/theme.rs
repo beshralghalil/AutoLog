@@ -158,18 +158,38 @@ pub fn apply(ctx: &egui::Context, theme: egui::Theme) {
 
     ctx.style_mut_of(theme, |style| {
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-        style.spacing.button_padding = egui::vec2(10.0, 6.0);
-        style.spacing.interact_size.y = 26.0;
-        style.spacing.combo_height = 320.0;
-        style.spacing.menu_width = 260.0;
-        style.spacing.tooltip_width = 420.0;
-        style.spacing.scroll.bar_width = 10.0;
+        style.spacing.button_padding = egui::vec2(12.0, 8.0);
+        // Everything that can be clicked or typed into is at least this tall.
+        // egui's default leaves text fields cramped next to their labels.
+        style.spacing.interact_size.y = CONTROL_HEIGHT;
+        style.spacing.combo_height = 380.0;
+        style.spacing.menu_width = 280.0;
+        style.spacing.tooltip_width = 460.0;
+        style.spacing.scroll.bar_width = 11.0;
         style.visuals.indent_has_left_vline = false;
         style.wrap_mode = Some(egui::TextWrapMode::Truncate);
+
+        for (text_style, size) in [
+            (egui::TextStyle::Body, 14.0),
+            (egui::TextStyle::Button, 14.0),
+            (egui::TextStyle::Monospace, 13.0),
+            (egui::TextStyle::Small, 12.0),
+            (egui::TextStyle::Heading, 19.0),
+        ] {
+            style
+                .text_styles
+                .insert(text_style, egui::FontId::proportional(size));
+        }
+        style
+            .text_styles
+            .insert(egui::TextStyle::Monospace, egui::FontId::monospace(13.0));
     });
 }
 
-/// Height of one row in the entries table.
-pub const ROW_HEIGHT: f32 = 30.0;
+/// Height of a text field, button or dropdown.
+pub const CONTROL_HEIGHT: f32 = 30.0;
+/// Height of one row in the entries table. Tall enough for a dropdown to sit
+/// in a cell without being clipped.
+pub const ROW_HEIGHT: f32 = 36.0;
 /// Height of the table's header row.
-pub const HEADER_HEIGHT: f32 = 30.0;
+pub const HEADER_HEIGHT: f32 = 32.0;

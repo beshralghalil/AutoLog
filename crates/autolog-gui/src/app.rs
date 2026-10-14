@@ -150,6 +150,9 @@ pub struct AutoLogApp {
     /// from the system store into here so they can be edited, and written back
     /// there on save; they never reach the config file.
     pub forms: BTreeMap<String, BTreeMap<String, String>>,
+    /// Consumers whose stored secrets have been read back into `forms`. Until
+    /// a consumer is in here, its secrets are read-only.
+    pub secrets_loaded: BTreeSet<String>,
     pub consumer: Option<Arc<dyn Consumer>>,
     pub connection: Connection,
     /// Every name each destination field can take, by field key. Filled on
@@ -202,6 +205,7 @@ impl AutoLogApp {
             total_seconds: 0,
             forms: BTreeMap::new(),
             consumer: None,
+            secrets_loaded: BTreeSet::new(),
             connection: Connection::default(),
             bulk_choices: BTreeMap::new(),
             search: String::new(),
@@ -373,9 +377,18 @@ impl AutoLogApp {
         let consumer = self.settings.consumer.clone();
         let mut failure = None;
 
+        // Reading the stored token happens off the painting thread, so the
+        // form is briefly empty after a consumer is selected. Writing that
+        // emptiness back would delete the token the user never touched, so
+        // secrets are only saved once what was stored has been read in.
+        let readable = self.secrets_loaded.contains(&consumer);
+
         for field in self.consumer_spec().credentials {
             let value = self.form_value(field.key).trim().to_owned();
             if field.secret {
+                if !readable {
+                    continue;
+                }
                 if let Err(error) = self.secrets.set(&consumer, field.key, &Secret::new(value)) {
                     failure = Some(error);
                 }
@@ -877,10 +890,13 @@ impl AutoLogApp {
                 consumer_id,
                 values,
             } => {
-                let form = self.forms.entry(consumer_id).or_default();
+                let form = self.forms.entry(consumer_id.clone()).or_default();
                 for (field, value) in values {
-                    form.insert(field, value);
+                    // Anything the user has typed in the meantime wins over
+                    // what was stored.
+                    form.entry(field).or_insert(value);
                 }
+                self.secrets_loaded.insert(consumer_id);
             }
         }
     }

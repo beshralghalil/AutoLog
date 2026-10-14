@@ -75,11 +75,15 @@ somewhere it controls.
 
 Each tracker declares the destinations it needs, and AutoLog guesses them from the entry's work item.
 
-- **Jira** needs an issue key. It is read out of the work item, understanding `ABC-123`, `[ABC-123]` and `[ABC] 123`.
-  AutoLog also fetches your projects on connect, so a key whose project does not exist is caught before you post fifty
-  entries against it. Choosing a different project in the table rewrites that row's key.
+- **Jira** needs a project and an issue. Both are fetched on connect — the projects you can see, and the issues you are
+  assigned to or have already logged against — and matched against the work item, which usually carries the key in a shape
+  like `ABC-123`, `[ABC-123]` or `[ABC] 123`. Issues are narrowed to the project you chose. An issue the search did not
+  return can still be typed straight into the picker.
 - **Kimai** needs a project and an activity. Activities are narrowed to the project you chose, so changing a row's project
   re-matches its activity underneath.
+
+Changing a row's project carries its issue or activity with it, rather than leaving a destination that contradicts the
+column beside it.
 
 How hard AutoLog tries is **set per field**, in Settings:
 
@@ -90,21 +94,22 @@ How hard AutoLog tries is **set per field**, in Settings:
 | **Contains** | That, or one name appearing whole inside the other. |
 | **Similar** | That, plus the closest name that scores above the threshold. |
 
-A Kimai **project matches exactly** by default: a project is a hard fact, and work landing on the wrong one is hard to
-notice. An **activity is matched loosely**, because an activity is free text somebody typed twice. Change either in Settings
-and every row is matched again.
+**Projects match on Contains** by default, so a work item that names the project anywhere in its text finds it. An
+**activity or issue is matched loosely**, because both are free text somebody typed twice. Tighten a field to Exact, or turn
+it off with Manual, in Settings — every row is matched again when you do.
 
 Names that differ only in their numbers are never paired, whatever the strategy, so an entry on `ABC-6061` will not quietly
 land on an `ABC-6055` activity.
 
-Anything AutoLog could not work out is marked with a `?` next to the text it was matching against, so you can see what the
-entry was. Those rows are refused at posting time rather than guessed at.
+Anything AutoLog could not work out keeps the text it was matching against, coloured so it stands out, with a tooltip
+saying what it looked for. Those rows are refused at posting time rather than guessed at.
 
 ### Reviewing
 
 - **Search** looks at every column, including the ones from your file.
 - **Filter chips** narrow the table to one status.
-- **Click a cell** in the Issue column to type a key, or in a destination column to pick from a searchable list.
+- **Click a cell** to change where that row goes. A destination opens a searchable list: start typing and it filters
+  straight away, with no need to click into the filter box first.
 - **Select rows** with the checkboxes, then use the pickers in the toolbar to set a destination on all of them at once.
   With nothing selected, those pickers apply to everything currently on screen.
 - Sort by any column by clicking its heading.
@@ -117,8 +122,8 @@ entry was. Those rows are refused at posting time rather than guessed at.
 updates as it settles. **Stop** ends the run after the entries already in flight; it never leaves a half-posted entry,
 because each entry is one request.
 
-With **duplicate checking** on, AutoLog reads back what the tracker already has and skips anything with the same start,
-length and comment. A failed row can be fixed and posted again — anything already posted is left alone.
+With **duplicate checking** on — the toggle sits on the bottom bar, beside the total — AutoLog reads back what the tracker
+already has and skips anything with the same start, length and comment. A failed row can be fixed and posted again — anything already posted is left alone.
 
 Errors say what happened and what to do about it, with the technical detail behind a disclosure and a link to the log folder.
 

@@ -235,10 +235,13 @@ impl AutoLogApp {
                     ui,
                     palette,
                     "timezone",
-                    Some(self.settings.timezone.name()),
-                    &zones,
-                    "Pick a zone",
-                    260.0,
+                    widgets::Combo {
+                        selected: Some(self.settings.timezone.name()),
+                        choices: &zones,
+                        placeholder: "Pick a zone",
+                        width: 260.0,
+                        accepts: widgets::Accepts::ListedOnly,
+                    },
                 ) && let Ok(zone) = picked.parse()
                 {
                     self.settings.timezone = zone;

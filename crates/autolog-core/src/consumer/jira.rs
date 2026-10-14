@@ -32,7 +32,12 @@ const MAX_PAGES: u32 = 100;
 /// Issues whose worklogs are read back at the same time.
 const PRELOAD_CONCURRENCY: usize = 6;
 
+/// Issues fetched for the picker. Enough to cover what anybody logs against
+/// in a stretch, without making signing in slow.
+const ISSUE_LIMIT: u32 = 500;
+
 pub const PROJECT: &str = "project";
+pub const ISSUE: &str = "issue";
 
 pub static SPEC: ConsumerSpec = ConsumerSpec {
     id: "jira",
@@ -58,15 +63,26 @@ pub static SPEC: ConsumerSpec = ConsumerSpec {
             secret: true,
         },
     ],
-    targets: &[TargetFieldSpec {
-        key: PROJECT,
-        label: "Project",
-        about: "Read from the issue key and checked against the projects Jira knows. \
-                Choosing a different one rewrites the key's prefix for that entry.",
-        default_strategy: MatchStrategy::Exact,
-        hints: &[Hint::ProjectKey, Hint::RawIssue, Hint::Activity],
-        scoped_by: None,
-    }],
+    targets: &[
+        TargetFieldSpec {
+            key: PROJECT,
+            label: "Project",
+            about: "Matched against the projects Jira knows, from the work item's key.",
+            default_strategy: MatchStrategy::Contains,
+            hints: &[Hint::ProjectKey, Hint::RawIssue, Hint::Activity],
+            scoped_by: None,
+        },
+        TargetFieldSpec {
+            key: ISSUE,
+            label: "Issue",
+            about: "The issue the work is logged against, matched within the chosen project. \
+                    Issues you are assigned to or have logged against are fetched on connect; \
+                    any other key can be typed into the picker.",
+            default_strategy: MatchStrategy::Contains,
+            hints: &[Hint::IssueKey, Hint::RawIssue, Hint::Activity],
+            scoped_by: Some(PROJECT),
+        },
+    ],
 };
 
 #[derive(Debug)]
@@ -76,8 +92,21 @@ pub struct Jira {
     /// Project keys the signed-in user can see. Empty until connected, and
     /// treated as "unknown" rather than "none" while it is.
     projects: Vec<String>,
+    /// Issues offered in the picker, newest first.
+    issues: Vec<Issue>,
     /// Worklogs already on each issue, by key.
     logged: RwLock<HashMap<String, Vec<LoggedEntry>>>,
+}
+
+/// One issue, as the picker shows it.
+#[derive(Debug, Clone)]
+struct Issue {
+    /// `ABC-123  Fix the thing`. The summary is part of the label on purpose:
+    /// it is what the user reads, and it gives the matcher something to work
+    /// with beyond a bare key. The key is read back off the front with
+    /// [`Jira::key_of`].
+    label: String,
+    project: String,
 }
 
 impl Jira {
@@ -112,8 +141,112 @@ impl Jira {
             )?,
             prevent_duplicates,
             projects: Vec::new(),
+            issues: Vec::new(),
             logged: RwLock::new(HashMap::new()),
         })
+    }
+
+    /// Fetch the issues this user plausibly logs against.
+    ///
+    /// Listing every issue on the instance is neither possible nor useful, so
+    /// this asks for the ones they are assigned to or have already logged
+    /// against, most recently touched first. Anything outside that can still
+    /// be typed into the picker by hand.
+    async fn load_issues(&mut self) -> Result<(), ConsumerError> {
+        const JQL: &str = "assignee = currentUser() OR worklogAuthor = currentUser() \
+                           ORDER BY updated DESC";
+
+        #[derive(Deserialize)]
+        struct Page {
+            #[serde(default)]
+            issues: Vec<RawIssue>,
+        }
+
+        #[derive(Deserialize)]
+        struct RawIssue {
+            key: String,
+            #[serde(default)]
+            fields: Fields,
+        }
+
+        #[derive(Deserialize, Default)]
+        struct Fields {
+            #[serde(default)]
+            summary: Option<String>,
+        }
+
+        let page: Page = match self.search(JQL).await {
+            Ok(page) => page,
+            Err(error) => {
+                // A picker with nothing in it is a smaller problem than not
+                // being able to post at all, so this is not fatal.
+                tracing::warn!("could not fetch the issue list: {error}");
+                self.issues.clear();
+                return Ok(());
+            }
+        };
+
+        self.issues = page
+            .issues
+            .into_iter()
+            .map(|issue| {
+                let project = issue.key.split('-').next().unwrap_or(&issue.key).to_owned();
+                let label = match issue.fields.summary {
+                    Some(summary) if !summary.trim().is_empty() => {
+                        format!("{}  {}", issue.key, summary.trim())
+                    }
+                    _ => issue.key.clone(),
+                };
+                Issue { label, project }
+            })
+            .collect();
+
+        Ok(())
+    }
+
+    /// Run a JQL search, over whichever search endpoint this instance has.
+    ///
+    /// Jira Cloud replaced `search` with `search/jql`; Server and Data Center
+    /// only have the old one. Trying the new path first and falling back on a
+    /// 404 covers both without asking the user which they are on.
+    async fn search<T: serde::de::DeserializeOwned>(&self, jql: &str) -> Result<T, HttpError> {
+        let limit = ISSUE_LIMIT.to_string();
+        let paths = ["rest/api/2/search/jql", "rest/api/2/search"];
+        let mut last = None;
+
+        for path in paths {
+            let request = self.api.request(Method::GET, path)?.query(&[
+                ("jql", jql),
+                ("maxResults", limit.as_str()),
+                ("fields", "summary"),
+            ]);
+
+            match self.api.send_json(request, Idempotency::Safe).await {
+                Ok(found) => return Ok(found),
+                Err(error @ HttpError::NotFound { .. }) => last = Some(error),
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last.unwrap_or_else(|| HttpError::NotFound {
+            service: "Jira".to_owned(),
+            what: "a usable search endpoint".to_owned(),
+        }))
+    }
+
+    /// The key out of a picker value like `ABC-123  Fix the thing`, or out of
+    /// a key the user typed themselves.
+    fn key_of(value: &str) -> &str {
+        value.split_whitespace().next().unwrap_or(value).trim()
+    }
+
+    /// Where this entry is going, as a bare issue key.
+    fn resolved_key(entry: &WorklogEntry) -> Option<&str> {
+        entry
+            .target(ISSUE)
+            .map(Self::key_of)
+            .or(entry.issue_key.as_deref())
+            .filter(|key| !key.is_empty())
     }
 
     async fn load_projects(&mut self) -> Result<(), ConsumerError> {
@@ -206,57 +339,88 @@ impl Consumer for Jira {
         // Cheap, and the first thing that fails when a token is wrong.
         let request = self.api.request(Method::GET, "rest/api/2/myself")?;
         self.api.send(request, Idempotency::Safe).await?;
-        self.load_projects().await
+        self.refresh().await
     }
 
     async fn refresh(&mut self) -> Result<(), ConsumerError> {
-        self.load_projects().await
+        self.load_projects().await?;
+        self.load_issues().await
     }
 
-    fn choices(&self, field: &str, _entry: &WorklogEntry) -> Vec<String> {
-        self.every_choice(field)
-    }
-
-    /// Nothing scopes a Jira project, so this is the same list either way.
-    fn every_choice(&self, field: &str) -> Vec<String> {
-        if field == PROJECT {
-            self.projects.clone()
-        } else {
-            Vec::new()
+    fn choices(&self, field: &str, entry: &WorklogEntry) -> Vec<String> {
+        match field {
+            PROJECT => self.projects.clone(),
+            // Narrowed to the project the row is going to, the way a Kimai
+            // activity is narrowed to its project.
+            ISSUE => {
+                let project = entry.target(PROJECT);
+                self.issues
+                    .iter()
+                    .filter(|issue| project.is_none_or(|project| issue.project == project))
+                    .map(|issue| issue.label.clone())
+                    .collect()
+            }
+            _ => Vec::new(),
         }
     }
 
-    /// Picking a project is picking where the work goes, so the issue key
-    /// follows it rather than being left contradicting the column beside it.
+    fn every_choice(&self, field: &str) -> Vec<String> {
+        match field {
+            PROJECT => self.projects.clone(),
+            ISSUE => self
+                .issues
+                .iter()
+                .map(|issue| issue.label.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Picking a project is picking where the work goes, so the issue follows
+    /// it rather than being left contradicting the column beside it.
     fn retarget(
         &self,
         entry: &mut WorklogEntry,
         field: &str,
         value: &str,
-        _strategies: &Strategies,
+        strategies: &Strategies,
     ) {
         entry.set_target(field, value);
 
         if field == PROJECT && !value.is_empty() {
-            if let Some(number) = entry.issue_key.as_deref().and_then(issue_number) {
-                entry.issue_key = Some(format!("{value}-{number}"));
-            }
             entry.project_key = Some(value.to_owned());
+
+            // The issue belonged to the old project. Carry its number over
+            // where there is one, then look for a better match under the new
+            // project.
+            if let Some(number) = Self::resolved_key(entry).and_then(issue_number) {
+                entry.set_target(ISSUE, format!("{value}-{number}"));
+            } else {
+                entry.set_target(ISSUE, "");
+            }
+
+            if entry.target(ISSUE).is_none()
+                && let Some(spec) = SPEC.target(ISSUE)
+            {
+                self.match_field(entry, spec, strategies);
+            }
         }
 
         entry.reset();
     }
 
     fn validate(&self, entry: &WorklogEntry) -> Result<(), ConsumerError> {
-        let Some(key) = entry
-            .issue_key
-            .as_deref()
-            .filter(|key| !key.trim().is_empty())
-        else {
+        let Some(key) = Self::resolved_key(entry) else {
             return Err(ConsumerError::Incomplete {
-                what: "issue key".to_owned(),
+                what: "issue".to_owned(),
             });
         };
+
+        if issue_number(key).is_none() {
+            return Err(ConsumerError::Incomplete {
+                what: format!("usable issue key - `{key}` is not one, it should read like ABC-123"),
+            });
+        }
 
         if !self.project_is_known(key) {
             let project = key.split('-').next().unwrap_or(key);
@@ -275,7 +439,7 @@ impl Consumer for Jira {
 
         let keys: BTreeSet<String> = entries
             .iter()
-            .filter_map(|entry| entry.issue_key.clone())
+            .filter_map(|entry| Self::resolved_key(entry).map(ToOwned::to_owned))
             .collect();
 
         let fetched: Vec<(String, Vec<LoggedEntry>)> = futures::stream::iter(keys)
@@ -299,7 +463,7 @@ impl Consumer for Jira {
     }
 
     fn is_duplicate(&self, entry: &WorklogEntry) -> bool {
-        let Some(key) = entry.issue_key.as_deref() else {
+        let Some(key) = Self::resolved_key(entry) else {
             return false;
         };
 
@@ -313,12 +477,11 @@ impl Consumer for Jira {
 
     async fn submit(&self, entry: &WorklogEntry) -> Result<Posted, ConsumerError> {
         self.validate(entry)?;
-        let key = entry
-            .issue_key
-            .clone()
+        let key = Self::resolved_key(entry)
             .ok_or_else(|| ConsumerError::Incomplete {
-                what: "issue key".to_owned(),
-            })?;
+                what: "issue".to_owned(),
+            })?
+            .to_owned();
 
         if self.is_duplicate(entry) {
             return Err(ConsumerError::Duplicate);
@@ -417,6 +580,23 @@ mod tests {
         jira
     }
 
+    /// A Jira that has also fetched an issue list.
+    fn jira_with_issues(projects: &[&str], issues: &[&str]) -> Jira {
+        let mut jira = jira(projects);
+        jira.issues = issues
+            .iter()
+            .map(|label| Issue {
+                label: (*label).to_owned(),
+                project: Jira::key_of(label)
+                    .split('-')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+            .collect();
+        jira
+    }
+
     fn strategies() -> Strategies {
         SPEC.targets
             .iter()
@@ -435,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_with_no_issue_key_is_refused() {
+    fn an_entry_with_no_issue_is_refused() {
         let jira = jira(&["ABC"]);
         assert!(matches!(
             jira.validate(&entry("Meetings")),
@@ -467,14 +647,80 @@ mod tests {
     }
 
     #[test]
+    fn the_issue_is_matched_within_the_chosen_project() {
+        let jira = jira_with_issues(
+            &["ABC", "ACME"],
+            &["ACME-6055  Rename upload-queue", "ABC-1  Something else"],
+        );
+
+        let mut entries = vec![entry("ACME-6055")];
+        jira.assign(&mut entries, &strategies());
+
+        assert_eq!(entries[0].target(PROJECT), Some("ACME"));
+        assert_eq!(
+            entries[0].target(ISSUE),
+            Some("ACME-6055  Rename upload-queue")
+        );
+        // The summary rides along in the label, but only the key is posted.
+        assert_eq!(Jira::resolved_key(&entries[0]), Some("ACME-6055"));
+        assert!(jira.validate(&entries[0]).is_ok());
+    }
+
+    #[test]
+    fn the_issue_picker_is_narrowed_to_the_rows_project() {
+        let jira = jira_with_issues(
+            &["ABC", "ACME"],
+            &["ACME-6055  Rename upload-queue", "ABC-1  Something else"],
+        );
+
+        let mut entry = entry("ACME-6055");
+        entry.set_target(PROJECT, "ACME");
+        assert_eq!(
+            jira.choices(ISSUE, &entry),
+            ["ACME-6055  Rename upload-queue"]
+        );
+
+        // A bulk pick spans projects, so it is offered everything.
+        assert_eq!(jira.every_choice(ISSUE).len(), 2);
+    }
+
+    /// A key typed by hand, for an issue the search did not return.
+    #[test]
+    fn an_issue_that_is_not_in_the_list_can_still_be_posted() {
+        let jira = jira_with_issues(&["ABC"], &[]);
+        let mut entry = entry("Meetings");
+        jira.retarget(&mut entry, ISSUE, "ABC-99", &strategies());
+
+        assert_eq!(Jira::resolved_key(&entry), Some("ABC-99"));
+        assert!(jira.validate(&entry).is_ok());
+    }
+
+    #[test]
+    fn a_target_that_is_not_a_key_is_refused() {
+        let jira = jira_with_issues(&["ABC"], &[]);
+        let mut entry = entry("Meetings");
+        jira.retarget(&mut entry, ISSUE, "not a key", &strategies());
+
+        let error = jira.validate(&entry).unwrap_err();
+        assert!(error.to_string().contains("ABC-123"), "{error}");
+    }
+
+    #[test]
     fn choosing_a_project_carries_the_issue_key_with_it() {
-        let jira = jira(&["ABC", "ACME"]);
+        let jira = jira_with_issues(&["ABC", "ACME"], &[]);
         let mut entry = entry("ABC-6055");
+        jira.retarget(&mut entry, ISSUE, "ABC-6055", &strategies());
         jira.retarget(&mut entry, PROJECT, "ACME", &strategies());
 
-        assert_eq!(entry.issue_key.as_deref(), Some("ACME-6055"));
+        assert_eq!(Jira::resolved_key(&entry), Some("ACME-6055"));
         assert_eq!(entry.project_key.as_deref(), Some("ACME"));
         assert!(jira.validate(&entry).is_ok());
+    }
+
+    #[test]
+    fn the_key_is_read_off_the_front_of_a_picker_label() {
+        assert_eq!(Jira::key_of("ABC-123  Fix the thing"), "ABC-123");
+        assert_eq!(Jira::key_of("ABC-123"), "ABC-123");
     }
 
     #[test]
