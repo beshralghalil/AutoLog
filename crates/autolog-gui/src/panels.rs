@@ -334,10 +334,10 @@ impl AutoLogApp {
     /// Set a destination on many rows at once: the selection where there is
     /// one, otherwise everything the filters have left on screen.
     fn show_bulk_pickers(&mut self, ui: &mut Ui, palette: &Palette) {
-        let Some(consumer) = self.consumer.clone() else {
+        if self.consumer.is_none() {
             widgets::hint(ui, palette, "Connect to pick projects");
             return;
-        };
+        }
 
         let scope = if self.selection.is_empty() {
             format!("all {} shown", self.view.len())
@@ -345,17 +345,15 @@ impl AutoLogApp {
             format!("{} selected", self.selection.len())
         };
 
-        // Choices are gathered across every visible row, so the list holds
-        // everything any of them could use.
+        // A bulk picker sets one value across many rows, so it offers the
+        // tracker's whole catalogue rather than what any one row is narrowed
+        // to. Read from the cache, since this is drawn every frame.
         for field in self.consumer_spec().targets {
-            let mut choices: Vec<String> = self
-                .view
-                .iter()
-                .filter_map(|id| self.entry(*id))
-                .flat_map(|entry| consumer.choices(field.key, entry))
-                .collect();
-            choices.sort_unstable();
-            choices.dedup();
+            let choices = self
+                .bulk_choices
+                .get(field.key)
+                .cloned()
+                .unwrap_or_default();
 
             if let Some(picked) = widgets::searchable_combo(
                 ui,

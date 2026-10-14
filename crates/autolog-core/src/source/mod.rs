@@ -290,6 +290,28 @@ mod tests {
         assert_eq!(loaded.entries[1].activity, "Meetings");
     }
 
+    /// The window reads an entry by indexing on its id rather than searching
+    /// for it, which only holds while an id is a position.
+    #[test]
+    fn an_entrys_id_is_its_position() {
+        let (_dir, path) = write(
+            "grindstone.csv",
+            "Work Item,Start,Duration,Notes\n\
+             ABC-1,2025-05-04 08:00,1:00:00,fine\n\
+             ABC-2,whenever,1:00:00,this row is skipped\n\
+             ABC-3,2025-05-04 09:00,1:00:00,fine\n",
+        );
+
+        let loaded = load(&path, provider("grindstone").unwrap(), Tz::UTC, None).unwrap();
+        assert_eq!(loaded.skipped.len(), 1);
+        for (index, entry) in loaded.entries.iter().enumerate() {
+            assert_eq!(
+                entry.id, index,
+                "a skipped row must not leave a gap in the ids"
+            );
+        }
+    }
+
     #[test]
     fn keeps_every_source_column_on_the_entry() {
         let (_dir, path) = write(

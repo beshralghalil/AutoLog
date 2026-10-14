@@ -302,6 +302,9 @@ mod tests {
         fn choices(&self, _field: &str, _entry: &WorklogEntry) -> Vec<String> {
             Vec::new()
         }
+        fn every_choice(&self, _field: &str) -> Vec<String> {
+            Vec::new()
+        }
         fn validate(&self, entry: &WorklogEntry) -> Result<(), ConsumerError> {
             if self.invalid.lock().unwrap().contains(&entry.id) {
                 return Err(ConsumerError::Incomplete {

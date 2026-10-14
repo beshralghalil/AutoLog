@@ -214,6 +214,11 @@ impl Consumer for Jira {
     }
 
     fn choices(&self, field: &str, _entry: &WorklogEntry) -> Vec<String> {
+        self.every_choice(field)
+    }
+
+    /// Nothing scopes a Jira project, so this is the same list either way.
+    fn every_choice(&self, field: &str) -> Vec<String> {
         if field == PROJECT {
             self.projects.clone()
         } else {

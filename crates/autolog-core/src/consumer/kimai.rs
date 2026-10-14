@@ -303,6 +303,28 @@ impl Consumer for Kimai {
         names
     }
 
+    fn every_choice(&self, field: &str) -> Vec<String> {
+        let mut names: Vec<String> = match field {
+            PROJECT => self
+                .projects
+                .iter()
+                .map(|project| project.label.clone())
+                .collect(),
+            // Every activity, not just one project's: a bulk pick has to suit
+            // rows sitting on different projects.
+            ACTIVITY => self
+                .activities
+                .iter()
+                .map(|activity| activity.name.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
     fn validate(&self, entry: &WorklogEntry) -> Result<(), ConsumerError> {
         if self.project_id(entry).is_none() {
             return Err(ConsumerError::Incomplete {
@@ -532,6 +554,22 @@ mod tests {
         let mut entries = vec![entry("WIDGET-BaseImage")];
         kimai.assign(&mut entries, &loose);
         assert_eq!(entries[0].target(PROJECT), Some("WIDGET"));
+    }
+
+    /// A bulk pick has to suit rows on different projects, so it is offered
+    /// every activity rather than one project's.
+    #[test]
+    fn the_bulk_list_is_not_narrowed_to_one_project() {
+        let kimai = kimai();
+        assert_eq!(
+            kimai.every_choice(ACTIVITY),
+            ["BaseImage", "Development", "Meetings"]
+        );
+        assert_eq!(kimai.every_choice(PROJECT), ["WIDGET", "ACME"]);
+
+        let mut entry = entry("ACME-1");
+        entry.set_target(PROJECT, "ACME");
+        assert_eq!(kimai.choices(ACTIVITY, &entry), ["Development", "Meetings"]);
     }
 
     #[test]

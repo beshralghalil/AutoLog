@@ -171,6 +171,13 @@ pub trait Consumer: Send + Sync + std::fmt::Debug {
     /// whatever scoping field it has already been given.
     fn choices(&self, field: &str, entry: &WorklogEntry) -> Vec<String>;
 
+    /// Every name `field` can take, ignoring the scoping that narrows the
+    /// per-row list.
+    ///
+    /// This is what a bulk picker offers, since the value it sets has to suit
+    /// rows that are scoped differently from one another.
+    fn every_choice(&self, field: &str) -> Vec<String>;
+
     /// Everything that would stop this entry being posted, said plainly.
     /// Called by the dry run, and again before posting.
     fn validate(&self, entry: &WorklogEntry) -> Result<(), ConsumerError>;

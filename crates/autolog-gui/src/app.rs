@@ -152,6 +152,9 @@ pub struct AutoLogApp {
     pub forms: BTreeMap<String, BTreeMap<String, String>>,
     pub consumer: Option<Arc<dyn Consumer>>,
     pub connection: Connection,
+    /// Every name each destination field can take, by field key. Filled on
+    /// connect, because the toolbar's bulk pickers need it on every frame.
+    pub bulk_choices: BTreeMap<String, Vec<String>>,
 
     // The table.
     pub search: String,
@@ -200,6 +203,7 @@ impl AutoLogApp {
             forms: BTreeMap::new(),
             consumer: None,
             connection: Connection::default(),
+            bulk_choices: BTreeMap::new(),
             search: String::new(),
             filters: BTreeSet::new(),
             sort: None,
@@ -438,6 +442,7 @@ impl AutoLogApp {
         self.settings_dirty = true;
         self.consumer = None;
         self.connection = Connection::Disconnected;
+        self.bulk_choices.clear();
         self.editing = None;
         self.clear_targets();
         self.load_credentials(id);
@@ -711,8 +716,12 @@ impl AutoLogApp {
             });
         }
 
+        // A row that is no longer shown cannot be acted on, so it leaves the
+        // selection rather than being changed out of sight. Done against a set
+        // because both sides can be the length of the file.
+        let shown: std::collections::HashSet<EntryId> = visible.iter().copied().collect();
+        self.selection.retain(|id| shown.contains(id));
         self.view = visible;
-        self.selection.retain(|id| self.view.contains(id));
     }
 
     /// Search looks at everything on screen, including the source columns, so
@@ -770,8 +779,14 @@ impl AutoLogApp {
         self.mark_view_dirty();
     }
 
+    /// The entry with this id.
+    ///
+    /// An id is the row's position at load and nothing reorders `entries`, so
+    /// this is an index rather than a search. The table asks for one of these
+    /// per visible cell per frame, which a scan over a long export would not
+    /// survive.
     pub fn entry(&self, id: EntryId) -> Option<&WorklogEntry> {
-        self.entries.iter().find(|entry| entry.id == id)
+        self.entries.get(id).filter(|entry| entry.id == id)
     }
 
     /// How many rows sit at each status, for the filter chips.
@@ -938,7 +953,14 @@ impl AutoLogApp {
 
         match result {
             Ok(consumer) => {
-                self.consumer = Some(Arc::from(consumer));
+                let consumer: Arc<dyn Consumer> = Arc::from(consumer);
+                self.bulk_choices = self
+                    .consumer_spec()
+                    .targets
+                    .iter()
+                    .map(|field| (field.key.to_owned(), consumer.every_choice(field.key)))
+                    .collect();
+                self.consumer = Some(consumer);
                 self.connection = Connection::Connected;
                 self.notify(
                     NoticeKind::Success,
