@@ -1,10 +1,10 @@
 <div align="center">
   <a href="https://github.com/BishrGhalil/AutoLog">
-    <img alt="AutoLog.Logo" width="200" height="200" src="./assets/icon.png">
+    <img alt="AutoLog logo" width="200" height="200" src="./assets/icon.png">
   </a>
   <h1>AutoLog</h1>
   <p>
-    automates the process of logging work entries into Jira and Kimai.
+    Reads a worklog export from wherever you track your time, and posts every entry to wherever it has to be logged.
   </p>
   <a href="https://github.com/BishrGhalil/AutoLog/releases/latest">
     <img src="https://img.shields.io/github/v/release/BishrGhalil/AutoLog">
@@ -12,132 +12,176 @@
   <a href="https://github.com/BishrGhalil/AutoLog/releases/latest">
     <img src="https://img.shields.io/github/release-date/BishrGhalil/AutoLog">
   </a>
-  <a href="https://github.com/BishrGhalil/AutoLog/tree/dev">
-    <img src="https://img.shields.io/github/last-commit/BishrGhalil/AutoLog">
-  </a>
   <a href="https://github.com/BishrGhalil/AutoLog/releases/">
     <img src="https://img.shields.io/github/downloads/BishrGhalil/AutoLog/total">
-  <a href="https://github.com/BishrGhalil/AutoLog/blob/dev/LICENSE">
+  </a>
+  <a href="https://github.com/BishrGhalil/AutoLog/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/BishrGhalil/AutoLog">
   </a>
 </div>
 
-
 ## About
-**AutoLog** reads a worklog export from wherever you track your time, and posts every entry to wherever it has to be logged.
 
-It is built around two sides:
+AutoLog is built around two sides:
 
-- **Providers** are where the entries come from: a **CSV** or **Excel** export from **Grindstone**, **Kimai**, or **Odoo**.
+- **Providers** are where the entries come from: a CSV or spreadsheet export from **Grindstone**, **Kimai** or **Odoo**.
 - **Consumers** are where the entries go: **Jira** or **Kimai**.
 
-Pick one of each, point AutoLog at the file, and review the table before anything is posted.
+Pick one of each, point AutoLog at the file, review the table, and press Post. Nothing leaves your machine until you do.
 
-<img src=".github/ui.png" alt="UI" width="70%"/>
+<img src=".github/ui.png" alt="A Grindstone export loaded, ready to post to Kimai" width="100%"/>
 
-## Prerequisites
-- A worklog file exported from one of the supported providers.
-- Credentials for the consumer you are logging into:
-  - **Jira**: your account email and an [API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/#Create-an-API-token).
-  - **Kimai**: an API token from *User profile → API*, used as a bearer token.
+This is the Rust rewrite of AutoLog, replacing the Python and Tk version. It is a single executable with nothing to install
+alongside it, it posts entries in parallel rather than one at a time, and it shows every column your export has rather than
+only the handful it needs.
 
-Credentials are stored per consumer in your system keyring, so you can switch between Jira and Kimai without retyping them.
+## Install
 
-## Logging into Jira
-Each entry needs an issue key. AutoLog takes it from the provider's work item or activity field, understanding formats like `ABC-123`, `[ABC-123]` and `[ABC] 123`. Any entry it cannot read a key from is flagged in the table — double-click the **Issue** cell to fix it before processing.
+Download the executable for your platform from the [releases page](https://github.com/BishrGhalil/AutoLog/releases).
 
-## Logging into Kimai
-Kimai files entries under a project and an activity instead of an issue key, so AutoLog adds a **Project** and an **Activity** column.
+- **Windows** — `autolog.exe`. Signed; no runtime to install.
+- **Linux** — `autolog`. Needs a desktop with OpenGL, which any normal install has. Mark it executable with `chmod +x autolog`.
 
-After the file is loaded, AutoLog fetches your projects and activities and matches each entry against them, using the work item as a hint — an entry on `ACME-6055` lands on the `ACME` project, and `WIDGET-BaseImage` on `WIDGET` / `BaseImage`. Matching is fuzzy, so names do not have to line up exactly.
+You can also open an export with AutoLog directly: `autolog path/to/export.csv`.
 
-Names that differ only in their numbers are never paired up, so an entry on `ABC-6061` will not quietly land on an `ABC-6055` activity. Anything left unmatched is marked with a `?` next to the text that was matched against, so you can see what the entry was and map it yourself, and it is refused at processing time rather than guessed at.
+## Using it
 
-You stay in control of the result:
+### Loading a file
 
-- Use the **Project** and **Activity** dropdowns above the file picker to apply one choice to every entry at once.
-- Double-click any **Project** or **Activity** cell to override a single entry. Changing a row's project re-matches its activity within that project.
-- **Refresh** re-fetches projects and activities from Kimai, filling only the gaps, so anything you mapped by hand is kept.
+Choose your provider, then drop the export onto the window or press **Choose file**. AutoLog reads `.csv`, `.tsv`, `.xlsx`,
+`.xlsm`, `.xls` and `.ods`, sniffs comma, semicolon and tab separators, and copes with the byte-order mark spreadsheets
+like to write.
 
----
+Rows it cannot read — a date it does not recognise, a length that is not a length — are listed rather than quietly dropped.
 
-# Usage:
+Every column in the file is kept. Use the **Columns** menu to show any of them beside the ones AutoLog always shows, and the
+choice is remembered per provider.
 
-## Download
-You may download the executable from the [releases page](https://github.com/BishrGhalil/AutoLog/releases)
+### Connecting
 
-## Run from source code
-Clone the repository:
+Fill in the credentials for your tracker and press **Connect**.
 
-```bash
-git clone https://github.com/BishrGhalil/AutoLog.git
-cd AutoLog
-```
+- **Jira** needs your site address, your account email and an [API token](https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/#Create-an-API-token).
+- **Kimai** needs your site address and an API token from *User profile → API*.
 
-Set up your Python environment:
+Tokens go to your operating system's credential store — Windows Credential Manager, or the Secret Service on Linux. They are
+never written to the settings file. Everything else you pick, including which consumer you used last, comes back the next
+time you open AutoLog.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python main.py
-```
+If no credential store can be reached, AutoLog says so and keeps the tokens for that session only, rather than writing them
+somewhere it controls.
 
----
+### Deciding where each entry goes
+
+Each tracker declares the destinations it needs, and AutoLog guesses them from the entry's work item.
+
+- **Jira** needs an issue key. It is read out of the work item, understanding `ABC-123`, `[ABC-123]` and `[ABC] 123`.
+  AutoLog also fetches your projects on connect, so a key whose project does not exist is caught before you post fifty
+  entries against it. Choosing a different project in the table rewrites that row's key.
+- **Kimai** needs a project and an activity. Activities are narrowed to the project you chose, so changing a row's project
+  re-matches its activity underneath.
+
+How hard AutoLog tries is **set per field**, in Settings:
+
+| Strategy | What it accepts |
+| --- | --- |
+| **Manual** | Nothing. Every row waits for you. |
+| **Exact** | Only a name that reads identically once case and punctuation are set aside. |
+| **Contains** | That, or one name appearing whole inside the other. |
+| **Similar** | That, plus the closest name that scores above the threshold. |
+
+A Kimai **project matches exactly** by default: a project is a hard fact, and work landing on the wrong one is hard to
+notice. An **activity is matched loosely**, because an activity is free text somebody typed twice. Change either in Settings
+and every row is matched again.
+
+Names that differ only in their numbers are never paired, whatever the strategy, so an entry on `ABC-6061` will not quietly
+land on an `ABC-6055` activity.
+
+Anything AutoLog could not work out is marked with a `?` next to the text it was matching against, so you can see what the
+entry was. Those rows are refused at posting time rather than guessed at.
+
+### Reviewing
+
+- **Search** looks at every column, including the ones from your file.
+- **Filter chips** narrow the table to one status.
+- **Click a cell** in the Issue column to type a key, or in a destination column to pick from a searchable list.
+- **Select rows** with the checkboxes, then use the pickers in the toolbar to set a destination on all of them at once.
+  With nothing selected, those pickers apply to everything currently on screen.
+- Sort by any column by clicking its heading.
+
+### Posting
+
+**Dry run** checks every entry against the tracker without sending anything, and marks what is incomplete.
+
+**Post** sends everything not already posted. Entries go out several at a time, under a rate limit you can set, and each row
+updates as it settles. **Stop** ends the run after the entries already in flight; it never leaves a half-posted entry,
+because each entry is one request.
+
+With **duplicate checking** on, AutoLog reads back what the tracker already has and skips anything with the same start,
+length and comment. A failed row can be fixed and posted again — anything already posted is left alone.
+
+Errors say what happened and what to do about it, with the technical detail behind a disclosure and a link to the log folder.
 
 ## Development
 
 ```bash
-python3 -m pip install uv
-uv sync
-pre-commit install
-uv run main.py
+cargo run -p autolog-gui            # or: cargo run -p autolog-gui -- samples/grindstone.csv
+cargo test --workspace
+cargo clippy --workspace --all-targets
+cargo fmt --all
 ```
 
-Use [commitizen](https://commitizen-tools.github.io/commitizen/):
+The workspace is two crates:
 
-for committing
-```bash
-cz c
+- **`autolog-core`** — the rules, with no knowledge of a window: reading files, matching names, talking to trackers, and
+  the posting pipeline. This is where the tests are.
+- **`autolog-gui`** — the window, built with [egui](https://github.com/emilk/egui). State changes only on the painting
+  thread; slow work runs on a Tokio runtime and reports back between frames.
+
+### Adding a provider
+
+Providers are data. Add a `ProviderSpec` to `PROVIDERS` in [`crates/autolog-core/src/source/spec.rs`](crates/autolog-core/src/source/spec.rs),
+naming the columns and how that vendor writes a duration. There is no trait to implement and nothing else to touch.
+
+```rust
+ProviderSpec {
+    id: "toggl",
+    label: "Toggl",
+    about: "CSV export with Description, Start date, Start time and Duration columns.",
+    started: &["Start date", "Start time"],
+    default_time: None,
+    duration: "Duration",
+    duration_format: DurationFormat::Clock,
+    description: "Description",
+    activity: "Description",
+    issue_source: "Description",
+    date_order: DateOrder::Auto,
+}
 ```
 
-for bumping:
-```bash
-cz bump
-```
+### Adding a consumer
 
-Run linters:
+Write a `ConsumerSpec` declaring the credentials it needs and the destination fields each entry must be given, then
+implement [`Consumer`](crates/autolog-core/src/consumer/mod.rs) for the parts that are genuinely its own: signing in,
+listing its names, reading back what is already logged, and posting one entry.
 
-```bash
-ruff check .
-```
-
-Build executable:
-
-```bash
-pyinstaller --noconfirm --clean autolog.spec
-```
-
-[Signing the executable](https://gist.github.com/PaulCreusy/7fade8d5a8026f2228a97d31343b335e)
-
----
+Guessing which name an entry belongs to is not one of those parts. It is handled once, for every consumer, from the hints
+and strategy the spec declares — so a new tracker gets matching, bulk editing, per-field strategies and its row in the
+Settings panel without writing any of them. Register it in `CONSUMERS` and `build`.
 
 ## Roadmap
 
-- [X] Cooldown
-- [X] Windows Executable
-- [X] Code signing for Windows
-- [X] Kimai as a logging target
-- [ ] Async requests
-
----
+- [x] Windows executable, code signed
+- [x] Kimai as a logging target
+- [x] Parallel posting with a rate limit
+- [x] Per-field matching strategies
+- [x] Every source column in the table
+- [ ] A command-line mode for unattended runs
 
 ## Contributing
 
-Contributions are welcome. Please fork the repo and create a pull request.
-
----
+Contributions are welcome. Please fork the repo and open a pull request.
 
 ## License
 
-MIT License. See `LICENSE` file for details.
+MIT. See [`LICENSE`](LICENSE).

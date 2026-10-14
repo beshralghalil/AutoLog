@@ -1,0 +1,42 @@
+[package]
+name = "autolog-core"
+description = "Reading worklog exports and posting them to Jira or Kimai."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+base64 = "0.23.1"
+calamine = { version = "0.36.1", features = ["dates"] }
+chrono = "0.4.45"
+chrono-tz = { version = "0.10.4", features = ["serde"] }
+csv = "1.4.0"
+directories = "6.0.0"
+futures = "0.3.34"
+indexmap = { version = "2.14.2", features = ["serde"] }
+keyring = "4.2.0"
+rand = "0.10.3"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "gzip", "charset", "http2", "system-proxy", "query"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "sync", "time", "macros"] }
+toml = "1.1.8"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = "2.5.8"
+zeroize = "1.9.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "test-util"] }
+
+[lints]
+workspace = true

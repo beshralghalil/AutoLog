@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = ["crates/autolog-core", "crates/autolog-gui"]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/BishrGhalil/AutoLog"
+authors = ["Beshr Alghalil"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
+# A `#[derive(Deserialize)]` shape defined right above the call it decodes is
+# clearer than the same type parked at the top of the file.
+items_after_statements = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,13 +1,11 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
+# Build output
+/target/
 dist/
-wheels/
-*.egg-info
 
-# Virtual environments
-.venv
+# Editors
 .vscode/launch.json
+.idea/
+
+# Logs and secrets
 *.log
 certificate.pfx

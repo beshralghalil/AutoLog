@@ -1,0 +1,2 @@
+# Product and vendor names that read as camel case but are spelled that way.
+doc-valid-idents = ["AutoLog", "Kimai", "Grindstone", "AutoLog's", ".."]

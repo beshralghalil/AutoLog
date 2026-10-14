@@ -1,0 +1,31 @@
+[package]
+name = "autolog-gui"
+description = "AutoLog: post a worklog export to Jira or Kimai."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+# The name users see in a release and on their taskbar.
+name = "autolog"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+autolog-core = { path = "../autolog-core" }
+chrono-tz = "0.10.4"
+crossbeam-channel = "0.5.17"
+eframe = { version = "0.36.2", default-features = false, features = ["glow", "default_fonts", "accesskit", "links", "wayland", "x11", "persistence"] }
+egui = "0.36.2"
+egui_extras = { version = "0.36.2", features = ["image"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+open = "5.4.4"
+rfd = "0.17.2"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "sync", "time"] }
+tracing = "0.1.44"
+
+[lints]
+workspace = true
