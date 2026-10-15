@@ -14,7 +14,7 @@ use autolog_core::config::{ColumnLayout, Settings, Theme};
 use autolog_core::consumer::{self, Consumer, ConsumerSpec, Credentials};
 use autolog_core::error::{UserError, UserFacing};
 use autolog_core::model::{EntryId, EntryStatus, WorklogEntry};
-use autolog_core::pipeline::{self, Cancel, Progress, Summary};
+use autolog_core::pipeline::{self, Cancel, Progress};
 use autolog_core::secrets::{Secret, SecretStore};
 use autolog_core::source::{self, SkippedRow};
 use autolog_core::{MatchStrategy, matching};
@@ -114,7 +114,6 @@ pub enum NoticeKind {
 pub enum Modal {
     Error(Box<UserError>),
     Settings,
-    Summary(Summary),
     /// Rows the file had that could not be read.
     Skipped,
 }
@@ -1059,8 +1058,16 @@ impl AutoLogApp {
                 self.run = None;
                 self.mark_view_dirty();
 
+                // Said in the corner rather than behind a dialog: the table
+                // already shows what happened to every row, and a popup only
+                // stands between the user and it.
                 if summary.attempted() > 0 || summary.cancelled > 0 {
-                    self.modal = Some(Modal::Summary(summary));
+                    let kind = if summary.failed > 0 || summary.invalid > 0 {
+                        NoticeKind::Warning
+                    } else {
+                        NoticeKind::Success
+                    };
+                    self.notify(kind, summary.sentence());
                 }
             }
         }

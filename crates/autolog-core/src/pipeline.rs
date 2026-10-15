@@ -6,7 +6,7 @@
 //! half-posted entry behind: each one is a single request.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::StreamExt as _;
@@ -172,6 +172,7 @@ where
     let total = entries.len();
     let report = Arc::new(report);
     let pacer = Arc::new(Pacer::new(limit.per_minute));
+    let settled = Arc::new(AtomicUsize::new(0));
 
     report(Progress::Started { total });
 
@@ -180,6 +181,7 @@ where
             let consumer = Arc::clone(&consumer);
             let pacer = Arc::clone(&pacer);
             let report = Arc::clone(&report);
+            let settled = Arc::clone(&settled);
             let cancel = cancel.clone();
 
             async move {
@@ -197,10 +199,22 @@ where
 
                 report(Progress::Sending { id: entry.id });
 
-                Some(match consumer.submit(&entry).await {
+                let outcome = match consumer.submit(&entry).await {
                     Ok(posted) => Outcome::posted(entry.id, posted.reference),
                     Err(error) => Outcome::from_error(entry.id, &error),
-                })
+                };
+
+                // Reported here, as this entry settles, rather than after the
+                // whole batch has drained: a progress bar that only moves once
+                // everything is done is not a progress bar.
+                let done = settled.fetch_add(1, Ordering::SeqCst) + 1;
+                report(Progress::Settled {
+                    outcome: outcome.clone(),
+                    done,
+                    total,
+                });
+
+                Some(outcome)
             }
         })
         .buffer_unordered(limit.concurrency)
@@ -208,15 +222,8 @@ where
         .await;
 
     let mut summary = Summary::default();
-
-    for (index, outcome) in outcomes.into_iter().flatten().enumerate() {
-        let done = index + 1;
+    for outcome in outcomes.into_iter().flatten() {
         summary.count(outcome.status);
-        report(Progress::Settled {
-            outcome,
-            done,
-            total,
-        });
     }
 
     summary.cancelled = total - summary.attempted();
@@ -359,6 +366,57 @@ mod tests {
             concurrency: 4,
             per_minute: 0,
         }
+    }
+
+    /// Each entry has to report as it settles, not once the batch has drained.
+    ///
+    /// Collecting the whole stream before reporting left the bar on zero for
+    /// the length of the run and then jumped it to full, which is the one
+    /// thing a progress bar must not do.
+    #[tokio::test]
+    async fn an_entry_reports_as_it_settles_rather_than_at_the_end() {
+        let fake = Arc::new(Fake::default());
+        let (events, report) = collector();
+
+        run(
+            fake as Arc<dyn Consumer>,
+            entries(3),
+            // One at a time, so the order below is the only possible one.
+            RateLimit {
+                concurrency: 1,
+                per_minute: 0,
+            },
+            Cancel::new(),
+            report,
+        )
+        .await;
+
+        let order: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| match event {
+                Progress::Started { .. } => "started".to_owned(),
+                Progress::Sending { .. } => "sending".to_owned(),
+                Progress::Settled { done, .. } => format!("settled {done}"),
+                Progress::Finished(_) => "finished".to_owned(),
+            })
+            .collect();
+
+        assert_eq!(
+            order,
+            [
+                "started",
+                "sending",
+                "settled 1",
+                "sending",
+                "settled 2",
+                "sending",
+                "settled 3",
+                "finished",
+            ],
+            "each entry should settle before the next is sent"
+        );
     }
 
     #[tokio::test]

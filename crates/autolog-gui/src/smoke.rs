@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use autolog_core::EntryStatus;
 use autolog_core::config::Settings;
 use autolog_core::error::UserError;
-use autolog_core::pipeline::Summary;
 use autolog_core::secrets::Secret;
 use autolog_core::source::{self, SkippedRow};
 use chrono_tz::Tz;
@@ -217,12 +216,6 @@ fn every_dialog_draws() {
             .with_detail("dns error"),
         )),
         Modal::Settings,
-        Modal::Summary(Summary {
-            posted: 4,
-            skipped: 1,
-            failed: 1,
-            ..Summary::default()
-        }),
         Modal::Skipped,
     ];
 

@@ -3,8 +3,6 @@
 use autolog_core::MatchStrategy;
 use autolog_core::config::RateLimit;
 use autolog_core::error::UserError;
-use autolog_core::model::EntryStatus;
-use autolog_core::pipeline::Summary;
 use autolog_core::time::DateOrder;
 use egui::{Align2, Color32, Context, Order, RichText, Ui};
 
@@ -34,7 +32,6 @@ impl AutoLogApp {
         let title = match modal {
             Modal::Error(error) => error.title.clone(),
             Modal::Settings => "Settings".to_owned(),
-            Modal::Summary(_) => "Run finished".to_owned(),
             Modal::Skipped => "Rows that could not be read".to_owned(),
         };
 
@@ -56,7 +53,6 @@ impl AutoLogApp {
             let close = match &modal {
                 Some(Modal::Error(error)) => self.show_error(ui, palette, error),
                 Some(Modal::Settings) => self.show_settings(ui, palette),
-                Some(Modal::Summary(summary)) => self.show_summary(ui, palette, summary),
                 Some(Modal::Skipped) => self.show_skipped(ui, palette),
                 None => true,
             };
@@ -111,46 +107,6 @@ impl AutoLogApp {
                 && let Some(directory) = &self.log_directory
             {
                 let _ = open::that_detached(directory);
-            }
-        });
-        close
-    }
-
-    fn show_summary(&mut self, ui: &mut Ui, palette: &Palette, summary: &Summary) -> bool {
-        let headline = if summary.failed == 0 && summary.invalid == 0 {
-            RichText::new(format!("{} entries posted.", summary.posted))
-                .size(15.0)
-                .color(palette.success)
-        } else {
-            RichText::new(summary.sentence())
-                .size(15.0)
-                .color(palette.text)
-        };
-        ui.label(headline);
-
-        if summary.failed > 0 || summary.invalid > 0 {
-            ui.add_space(6.0);
-            widgets::hint(
-                ui,
-                palette,
-                "Fix the rows below and press Post again - anything already posted is left alone.",
-            );
-        }
-
-        ui.add_space(12.0);
-        let mut close = false;
-        ui.horizontal(|ui| {
-            if ui.button("Close").clicked() {
-                close = true;
-            }
-            if (summary.failed > 0 || summary.invalid > 0)
-                && ui.button("Show what failed").clicked()
-            {
-                self.filters = [EntryStatus::Failed, EntryStatus::Invalid]
-                    .into_iter()
-                    .collect();
-                self.mark_view_dirty();
-                close = true;
             }
         });
         close

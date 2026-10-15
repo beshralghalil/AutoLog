@@ -452,13 +452,25 @@ fn editable_cell(
         }
 
         let shown = if text.trim().is_empty() { "-" } else { text };
-        let galley = ui.painter().layout(
+
+        // One line, cut with an ellipsis. A work item can be a whole sentence,
+        // and wrapping it would spill the cell over the rows beneath.
+        let mut job = egui::text::LayoutJob::simple_singleline(
             shown.to_owned(),
             egui::FontId::proportional(13.0),
             color,
-            rect.width() - 16.0,
         );
-        ui.painter().galley(
+        job.wrap = egui::text::TextWrapping {
+            max_width: (rect.width() - 16.0).max(1.0),
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+
+        let galley = ui.painter().layout_job(job);
+        // Clipped as well as cut, so a glyph that overhangs the ellipsis
+        // cannot reach the next column.
+        ui.painter().with_clip_rect(rect).galley(
             egui::pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
             galley,
             color,
