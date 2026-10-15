@@ -30,7 +30,12 @@ fn main() {
     if read.expose() == "hunter2" {
         println!("round trip:     ok");
     } else {
-        println!("round trip:     FAILED - got {:?}", read.expose());
+        // Deliberately not printed: whatever came back is somebody's secret,
+        // even when it is not the one this probe wrote.
+        println!(
+            "round trip:     FAILED - read back {} characters, not the probe value",
+            read.expose().len()
+        );
     }
 
     report_app_entries(&store);

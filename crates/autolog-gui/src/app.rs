@@ -353,6 +353,22 @@ impl AutoLogApp {
             return;
         }
 
+        // The token rides on every request, so an unencrypted address puts it
+        // on the wire in clear. Said out loud rather than only in the log.
+        if self
+            .consumer_spec()
+            .credentials
+            .iter()
+            .any(|field| field.key == "base_url")
+            && self.form_value("base_url").trim().starts_with("http://")
+        {
+            self.notify(
+                NoticeKind::Warning,
+                "That address is http://, so your token will be sent unencrypted. \
+                 Use https:// unless you are certain the network is private.",
+            );
+        }
+
         self.save_credentials();
         self.connection = Connection::Connecting;
 

@@ -161,6 +161,18 @@ impl ApiClient {
         let service = service.into();
         let base = parse_base_url(base_url)?;
 
+        // Credentials go on every request, so an address the user typed with
+        // `http://` would put their token on the wire in clear. An address
+        // with no scheme is made https, so reaching here means they asked for
+        // plain http outright; that is theirs to decide, but not quietly.
+        if base.scheme() != "https" {
+            tracing::warn!(
+                service = %service,
+                scheme = base.scheme(),
+                "credentials will be sent unencrypted: the address is not https"
+            );
+        }
+
         for value in headers.values_mut() {
             value.set_sensitive(true);
         }

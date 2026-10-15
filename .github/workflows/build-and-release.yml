@@ -6,8 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default. Only the job that publishes gets write, so a
+# compromised dependency in the build cannot push to the repository.
 permissions:
-  contents: write # needed for creating tags and releases
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,13 +22,13 @@ jobs:
     name: Lint and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       # winit and the file dialog look these up while building, though the
       # finished binary loads them at runtime instead of linking them.
@@ -58,13 +60,13 @@ jobs:
             artifact: autolog-windows-x86_64.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -84,7 +86,7 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
@@ -93,12 +95,14 @@ jobs:
   release:
     name: Release
     needs: build
+    permissions:
+      contents: write # creating the tag and the release
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist
           merge-multiple: true
@@ -130,7 +134,7 @@ jobs:
       # Signing happens here rather than in the build job so the certificate is
       # only ever handed to the one job that publishes.
       - name: Code-sign the Windows executable
-        uses: skymatic/code-sign-action@v1
+        uses: skymatic/code-sign-action@cfcc1c15b32938bab6dea25192045b6d2989e4d0 # v1
         with:
           certificate: ${{ secrets.PFX_CERT }} # base64-encoded .pfx
           password: ${{ secrets.PFX_PASS }}
@@ -141,7 +145,7 @@ jobs:
           recursive: true
 
       - name: Create the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           name: Release v${{ steps.version.outputs.VERSION }}

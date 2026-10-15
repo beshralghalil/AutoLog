@@ -416,7 +416,7 @@ impl Consumer for Jira {
             });
         };
 
-        if issue_number(key).is_none() {
+        if !is_wellformed_key(key) {
             return Err(ConsumerError::Incomplete {
                 what: format!("usable issue key - `{key}` is not one, it should read like ABC-123"),
             });
@@ -437,9 +437,13 @@ impl Consumer for Jira {
             return Ok(());
         }
 
+        // Filtered here too, not only in `validate`: these keys go straight
+        // into a request path, and this runs before anything is validated.
         let keys: BTreeSet<String> = entries
             .iter()
-            .filter_map(|entry| Self::resolved_key(entry).map(ToOwned::to_owned))
+            .filter_map(Self::resolved_key)
+            .filter(|key| is_wellformed_key(key))
+            .map(ToOwned::to_owned)
             .collect();
 
         let fetched: Vec<(String, Vec<LoggedEntry>)> = futures::stream::iter(keys)
@@ -525,6 +529,26 @@ fn issue_number(key: &str) -> Option<&str> {
     key.rsplit_once('-')
         .map(|(_, number)| number)
         .filter(|number| number.chars().all(|ch| ch.is_ascii_digit()) && !number.is_empty())
+}
+
+/// Whether `key` is shaped like an issue key and nothing else.
+///
+/// The key is interpolated into a request path, and one carrying `/` or `..`
+/// would resolve to a different endpoint than the one intended. Checking the
+/// number alone is not enough: it only reads the half after the last dash, so
+/// `../../myself-1` passes. Restricting the whole string to the characters a
+/// key may contain closes that without anything needing to be escaped.
+fn is_wellformed_key(key: &str) -> bool {
+    let Some((project, number)) = key.rsplit_once('-') else {
+        return false;
+    };
+
+    project.starts_with(|ch: char| ch.is_ascii_alphabetic())
+        && project
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && !number.is_empty()
+        && number.chars().all(|ch| ch.is_ascii_digit())
 }
 
 /// A worklog comment, which is plain text on the v2 API but may arrive as a
@@ -728,6 +752,39 @@ mod tests {
         assert_eq!(issue_number("ABC-6055"), Some("6055"));
         assert_eq!(issue_number("ABC"), None);
         assert_eq!(issue_number("ABC-X"), None);
+    }
+
+    /// The key is interpolated into a request path, so anything that could
+    /// walk out of it has to be refused before it gets there.
+    #[test]
+    fn a_key_that_could_escape_the_url_path_is_refused() {
+        assert!(is_wellformed_key("ABC-123"));
+        assert!(is_wellformed_key("ABC1_X-9"));
+
+        for crafted in [
+            "../../myself-1",
+            "../../../admin-9",
+            "ABC/../other-1",
+            "ABC%2f..-1",
+            "ABC -1",
+            "-1",
+            "ABC",
+            "1ABC-2",
+        ] {
+            assert!(!is_wellformed_key(crafted), "{crafted} should be refused");
+        }
+    }
+
+    #[test]
+    fn validate_refuses_a_crafted_key_even_though_it_ends_in_a_number() {
+        let jira = jira_with_issues(&[], &[]);
+        let mut entry = entry("Meetings");
+        jira.retarget(&mut entry, ISSUE, "../../myself-1", &strategies());
+
+        // `issue_number` alone would have accepted this: it reads only the
+        // half after the last dash.
+        assert_eq!(issue_number("../../myself-1"), Some("1"));
+        assert!(jira.validate(&entry).is_err());
     }
 
     #[test]

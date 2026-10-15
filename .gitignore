@@ -9,3 +9,9 @@ dist/
 # Logs and secrets
 *.log
 certificate.pfx
+
+# Local agent and editor configuration. Kept out of the repository because
+# files of this shape routinely grow API keys for whatever they talk to.
+.claude/
+.mcp.json
+.ignore
